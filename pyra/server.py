@@ -112,7 +112,35 @@ def concern(corpus, body, query):
 
 
 def weakness(corpus, body, query):
-    return engine("research").weakness(corpus)
+    research = engine("research")
+    rows = research.weakness(corpus)
+    min_runs = evidence.decisions()["min_runs_for_sufficient"]
+    for row in rows:
+        row["dominant_weakness"] = research.dominant_weakness(row, min_runs)
+    return rows
+
+
+def opportunities(corpus, body, query):
+    """body: {"missions": [{"name", "scenario", "relevance"?}]} or {"scenario": raw} for just one."""
+    missions = body.get("missions") or [{"name": "your scenario", "scenario": body.get("scenario") or {}}]
+    for mission in missions:
+        if not isinstance(mission, dict) or not isinstance(mission.get("scenario"), dict):
+            raise BadRequest("each mission needs a 'name' and a 'scenario' object")
+        mission.setdefault("name", "unnamed")
+    return engine("research").opportunities(corpus, missions)
+
+
+def backtest(corpus, body, query):
+    """body: {"cutoff_year": 2015, "years": {acronym or publication id: year}, "checks": [...]}"""
+    try:
+        cutoff = int(body.get("cutoff_year"))
+        years = {(int(k) if str(k).isdigit() else k): int(v) for k, v in (body.get("years") or {}).items()}
+    except (TypeError, ValueError) as err:
+        raise BadRequest(f"cutoff_year and every year must be whole numbers ({err})") from err
+    checks = body.get("checks") or []
+    if not checks:
+        raise BadRequest("backtest needs at least one check {name, scenario, should_flag}")
+    return engine("research").backtest(corpus, cutoff, years, checks)
 
 
 def builder_match(corpus, body, query):
@@ -151,6 +179,8 @@ POST_ROUTES = {
     "/api/report": report,
     "/api/concern": concern,
     "/api/builder/match": builder_match,
+    "/api/research/opportunities": opportunities,
+    "/api/research/backtest": backtest,
     "/api/ask": ask,
 }
 

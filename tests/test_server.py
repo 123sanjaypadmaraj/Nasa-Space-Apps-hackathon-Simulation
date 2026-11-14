@@ -56,6 +56,39 @@ class ServerTest(unittest.TestCase):
         content_type, _ = self.get("/app.js")
         self.assertIn("javascript", content_type)
 
+    def test_page_has_three_tabs_and_no_compare_tab(self):
+        _, body = self.get("/")
+        page = body.decode()
+        for tab in ("explore", "ops", "builder"):
+            self.assertIn(f'data-tab="{tab}"', page)
+        self.assertEqual(page.count('data-tab="'), 3)
+        self.assertIn('id="ask-panel"', page)
+        for label in ("MEASURED", "DERIVED", "HYPOTHETICAL", "INTERPRETATION", "SIMULATED",
+                      "PLACEHOLDER", "ILLUSTRATIVE", "PROPOSAL"):
+            self.assertIn(label, page)
+
+    def test_weakness_names_the_dominant_weakness(self):
+        _, body = self.get("/api/research/weakness")
+        rows = json.loads(body)
+        self.assertTrue(rows)
+        self.assertTrue(all("dominant_weakness" in row for row in rows))
+
+    def test_opportunities_for_one_scenario(self):
+        found = self.post("/api/research/opportunities", {"scenario": {"o2_percent": 34, "gravity_g": 0.16}})
+        self.assertTrue(found)
+        self.assertTrue(all(row["label"] == "DERIVED" for row in found))
+        self.assertNotIn("pressure", {row["axis"] for row in found})  # unset, so not a gap
+
+    def test_backtest_needs_numbers(self):
+        with self.assertRaises(HTTPError) as caught:
+            self.post("/api/research/backtest", {"cutoff_year": "soon", "checks": [{}]})
+        self.assertEqual(caught.exception.code, 400)
+        caught.exception.close()
+        found = self.post("/api/research/backtest", {
+            "cutoff_year": 2015, "years": {},
+            "checks": [{"name": "c", "scenario": {"o2_percent": 34}, "should_flag": True}]})
+        self.assertEqual(found["hits"] + found["misses"], 1)
+
     def test_files_outside_the_web_folder_are_refused(self):
         with self.assertRaises(HTTPError) as caught:
             self.get("/../server.py")

@@ -130,3 +130,42 @@ pre { white-space: pre-wrap; font: 12px var(--mono); color: var(--muted); }
   .explorer { grid-template-columns: 1fr; }
   #map { height: 320px; }
 }
+
+/* ---------- navigation: 3 tabs, sub-views, menu, drawers ---------- */
+.tab, .subtab {
+  color: var(--text); text-decoration: none; padding: 6px 12px; border: 1px solid var(--line);
+  border-radius: 4px; background: #0e1a30;
+}
+.tab:hover, .subtab:hover { border-color: var(--cyan); }
+.tab[aria-current="page"], .subtab[aria-current="page"] { background: var(--cyan); color: #04121a; border-color: var(--cyan); }
+.subnav { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+.sub[hidden], .drawer[hidden] { display: none; }
+
+.menu { position: relative; }
+.menu summary { list-style: none; }
+.menu summary::-webkit-details-marker { display: none; }
+.menu[open] summary { border-color: var(--cyan); }
+.menu-items {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; min-width: 240px;
+  display: flex; flex-direction: column; background: #050b16; border: 1px solid var(--line); border-radius: 4px;
+}
+.menu-items a, .menu-items button {
+  display: block; text-align: left; padding: 8px 12px; border: 0; border-radius: 0; background: transparent;
+  color: var(--text); text-decoration: none; width: 100%;
+}
+.menu-items a:hover, .menu-items button:hover { background: var(--panel); }
+details.menu { background: none; border: 0; padding: 0; margin: 0; }
+
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 20; width: min(520px, 100vw);
+  overflow-y: auto; background: var(--panel); border-left: 1px solid var(--cyan); padding: 14px 16px;
+  box-shadow: -8px 0 24px #0008;
+}
+.drawer-head { justify-content: space-between; flex-wrap: nowrap; }
+.drawer-head h2 { margin: 0; }
+.drawer-close { font-size: 18px; line-height: 1; padding: 2px 9px; }
+#ask input { flex: 1; min-width: 160px; }
+textarea { font: inherit; color: var(--text); background: #0e1a30; border: 1px solid var(--line); border-radius: 4px; padding: 5px 9px; }
+
+.badge.int { color: #a8c7ff; border-color: #a8c7ff; }
+.badge.pro { color: #ffd9a0; border-color: #ffd9a0; }

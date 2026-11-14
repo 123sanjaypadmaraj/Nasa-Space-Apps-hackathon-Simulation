@@ -70,12 +70,43 @@ function table(rows) {
 
 /* ---------- views ---------- */
 
-function switchView(name) {
-  document.querySelectorAll(".view").forEach((v) => { v.hidden = v.id !== `view-${name}`; });
-  document.querySelectorAll(".roles button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.view === name));
-  if (name === "astronaut" || name === "mission") startTelemetry();
-  if (name === "researchers") loadWeakness();
-  if (name === "explorer") drawMap();
+// Routes are "#/<tab>/<sub>". Three tabs: explore, ops, builder.
+const TABS = { explore: ["coverage", "research", "compare", "report"], ops: ["crew", "controller"], builder: [] };
+// Old one-word views (from the six-tab layout) redirect to where they live now.
+const LEGACY = {
+  explorer: "explore", researchers: "explore/research", compare: "explore/compare", report: "explore/report",
+  astronaut: "ops/crew", mission: "ops/controller", builders: "builder",
+};
+
+function parseRoute(hash) {
+  let path = (hash || "").replace(/^#\/?/, "");
+  if (LEGACY[path]) path = LEGACY[path];
+  let [tab, sub] = path.split("/");
+  if (!TABS[tab]) tab = "explore";
+  if (!TABS[tab].includes(sub)) sub = TABS[tab][0];
+  return { tab, sub, canonical: sub ? `#/${tab}/${sub}` : `#/${tab}` };
+}
+
+function route() {
+  const { tab, sub, canonical } = parseRoute(location.hash);
+  const wanted = location.hash.replace(/^#\/?/, "");
+  if (LEGACY[wanted]) history.replaceState(null, "", canonical);
+  document.querySelectorAll(".view").forEach((v) => { v.hidden = v.id !== `view-${tab}`; });
+  document.querySelectorAll(".tab").forEach((a) => a.setAttribute("aria-current", a.dataset.tab === tab ? "page" : "false"));
+  const view = $(`#view-${tab}`);
+  view.querySelectorAll(".sub").forEach((s) => { s.hidden = s.id !== `sub-${sub}`; });
+  view.querySelectorAll(".subtab").forEach((a) => a.setAttribute("aria-current", a.dataset.sub === sub ? "page" : "false"));
+  if (tab === "ops") startTelemetry(); else stopTelemetry();
+  if (tab === "explore" && sub === "coverage") drawMap();
+  if (tab === "explore" && sub === "research") loadWeakness();
+}
+
+function toggleDrawer(id, open) {
+  const drawer = document.getElementById(id);
+  drawer.hidden = open === undefined ? !drawer.hidden : !open;
+  const toggle = document.querySelector(`[aria-controls=${id}]`);
+  if (toggle) toggle.setAttribute("aria-expanded", String(!drawer.hidden));
+  if (!drawer.hidden) { const first = drawer.querySelector("input, button:not(.drawer-close)"); if (first) first.focus(); }
 }
 
 /* ---------- Explorer ---------- */
@@ -304,7 +335,7 @@ async function openReport() {
   try {
     const built = await api("/api/report", { scenario: scenarioBody() });
     $("#report-out").innerHTML = built.html;
-    switchView("report");
+    location.hash = "#/explore/report";
     showError(null);
   } catch (err) { showError(err); }
 }
@@ -368,16 +399,19 @@ function latestByCompartment() {
   return latest;
 }
 
-async function startTelemetry() {
-  const picker = document.querySelector(".tele-scenario");
-  const name = picker.value;
+function stopTelemetry() {
   clearInterval(state.timer);
+  state.timer = null;
+}
+
+async function startTelemetry() {
+  if (state.timer) return;
+  const picker = $("#tele-scenario");
+  const name = picker.value;
   try {
     const sim = await api(`/api/telemetry?scenario=${encodeURIComponent(name || "")}&seed=1&steps=60`);
-    document.querySelectorAll(".tele-scenario").forEach((select) => {
-      if (!select.options.length) sim.scenarios.forEach((s) => select.appendChild(el("option", {}, s)));
-      select.value = name || sim.scenarios[0];
-    });
+    if (!picker.options.length) sim.scenarios.forEach((s) => picker.appendChild(el("option", {}, s)));
+    picker.value = name || sim.scenarios[0];
     state.telemetry = sim.samples;
     state.step = 0;
     showError(null);
@@ -394,12 +428,12 @@ async function tick() {
   await Promise.all(Object.entries(latest).map(async ([compartment, sample]) => {
     const history = state.telemetry.slice(0, state.step).filter((s) => s.compartment === compartment);
     try {
-      verdicts[compartment] = await api("/api/concern", { sample, history, material_class: document.querySelector(".material-class").value || "solid" });
+      verdicts[compartment] = await api("/api/concern", { sample, history, material_class: $("#material-class").value || "solid" });
     } catch (err) { showError(err); }
   }));
   drawAstronaut(latest, verdicts);
   drawMission(latest, verdicts);
-  if (state.step >= state.telemetry.length - 1) clearInterval(state.timer);
+  if (state.step >= state.telemetry.length - 1) stopTelemetry();
 }
 
 function drawAstronaut(latest, verdicts) {
@@ -491,6 +525,42 @@ async function loadWeakness() {
   } catch (err) { showError(err); }
 }
 
+async function runOpportunities() {
+  try {
+    const found = await api("/api/research/opportunities", { scenario: scenarioBody() });
+    $("#opportunities").replaceChildren(found.length ? table(found)
+      : el("p", { class: "note" }, "Every set axis is DIRECTLY_TESTED, or no axis is set, so there is nothing to rank."));
+    showError(null);
+  } catch (err) { showError(err); }
+}
+
+// "ACRONYM=2012" lines -> {ACRONYM: "2012"}
+function yearsOf(text) {
+  const years = {};
+  (text || "").split(/\n|,/).map((s) => s.trim()).filter(Boolean).forEach((line) => {
+    const [key, year] = line.split("=").map((s) => s.trim());
+    if (key && year) years[key] = year;
+  });
+  return years;
+}
+
+async function runBacktest(event) {
+  event.preventDefault();
+  const form = new FormData($("#backtest"));
+  const body = {
+    cutoff_year: form.get("cutoff_year"), years: yearsOf(form.get("years")),
+    checks: [{ name: "current scenario", scenario: scenarioBody(), should_flag: form.get("should_flag") === "on" }],
+  };
+  try {
+    const found = await api("/api/research/backtest", body);
+    $("#backtest-out").replaceChildren(
+      el("p", {}, `Kept before ${found.cutoff_year}: ${found.investigations_kept.join(", ") || "none"}. `
+        + `Dropped for having no year: ${found.undated_dropped.join(", ") || "none"}. Hits ${found.hits}, misses ${found.misses}. [DERIVED]`),
+      table(found.checks));
+    showError(null);
+  } catch (err) { showError(err); }
+}
+
 async function runAsk(event) {
   event.preventDefault();
   const question = new FormData($("#ask")).get("question");
@@ -510,31 +580,36 @@ async function start() {
     $(sel).value = i === 0 ? "o2_percent" : "flow_speed";
     $(sel).addEventListener("change", drawMap);
   });
-  document.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => switchView(b.dataset.view)));
   $("#scenario").addEventListener("submit", (e) => { e.preventDefault(); runCoverage(); });
-  $("#scenario [name=gravity_g]").addEventListener("input", (e) => { $("#g-out").value = e.target.value; });
+  $("#scenario [name=gravity_g]").addEventListener("input", (e) => {
+    $("#g-out").value = e.target.value;
+    $("#scenario [name=gravity_set]").checked = true;
+  });
   $("#report-btn").addEventListener("click", openReport);
+  $("#report-menu").addEventListener("click", (e) => { e.target.closest("details").open = false; openReport(); });
   $("#compare-btn").addEventListener("click", runCompare);
   $("#builder").addEventListener("submit", runBuilder);
   $("#ask").addEventListener("submit", runAsk);
-  document.querySelectorAll(".tele-scenario").forEach((s) => s.addEventListener("change", (e) => {
-    document.querySelectorAll(".tele-scenario").forEach((o) => { o.value = e.target.value; });
-    startTelemetry();
-  }));
-  document.querySelectorAll(".material-class").forEach((input) => input.addEventListener("change", (e) => {
-    document.querySelectorAll(".material-class").forEach((o) => { o.value = e.target.value; });
-  }));
+  $("#ask-toggle").addEventListener("click", () => toggleDrawer("ask-panel"));
+  document.querySelectorAll(".drawer-close").forEach((b) => b.addEventListener("click", () => toggleDrawer(b.dataset.close, false)));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") document.querySelectorAll(".drawer:not([hidden])").forEach((d) => toggleDrawer(d.id, false));
+  });
+  $("#opportunities-btn").addEventListener("click", runOpportunities);
+  $("#backtest").addEventListener("submit", runBacktest);
+  $("#tele-scenario").addEventListener("change", () => { stopTelemetry(); startTelemetry(); });
   $("#large-text").addEventListener("click", (e) => {
     const on = document.body.classList.toggle("large");
     e.target.setAttribute("aria-pressed", on);
   });
   window.addEventListener("resize", drawMap);
+  window.addEventListener("hashchange", route);
 
   try {
     [state.investigations, state.runs] = await Promise.all([api("/api/investigations"), api("/api/runs")]);
   } catch (err) { return showError(err); }
   drawPicks();
-  drawMap();
+  route();
   runCoverage();
 }
 
