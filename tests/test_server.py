@@ -98,6 +98,22 @@ class ServerTest(unittest.TestCase):
         self.assertIn("comparable", found["verdict"])
         self.assertEqual(found["investigations"], acronyms)
 
+    def test_ops_view_is_deterministic_and_labelled(self):
+        body = {"scenario": "overheating_wire", "seed": 1, "steps": 100, "step": 90,
+                "compartments": ["habitat", "lab"], "material_class": "solid"}
+        first, second = self.post("/api/ops", body), self.post("/api/ops", body)
+        self.assertEqual(first, second)
+        self.assertEqual(first["label"], "SIMULATED")
+        self.assertEqual(set(first["compartments"]), {"habitat", "lab"})
+        self.assertIn("co_occurring", first["combined"])
+        self.assertEqual(len(first["compartments"]["habitat"]["tiles"]), 6)
+
+    def test_ops_unknown_scenario_is_a_400(self):
+        with self.assertRaises(HTTPError) as caught:
+            self.post("/api/ops", {"scenario": "meteor_strike"})
+        self.assertEqual(caught.exception.code, 400)
+        caught.exception.close()
+
     def test_files_outside_the_web_folder_are_refused(self):
         with self.assertRaises(HTTPError) as caught:
             self.get("/../server.py")

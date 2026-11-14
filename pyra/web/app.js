@@ -9,7 +9,6 @@ const QUANTITIES = {
 // Okabe-Ito, readable with the common forms of colour blindness.
 const PALETTE = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#BBBBBB"];
 const SHAPES = { bench: "circle", "spacecraft-scale": "square", unknown: "triangle" };
-const META_KEYS = ["source", "compartment", "t", "scenario", "label"];
 const SVG = "http://www.w3.org/2000/svg";
 
 const state = { investigations: [], runs: [], coverage: null, telemetry: [], step: 0, timer: null,
@@ -451,94 +450,187 @@ async function runCompare() {
   }
 }
 
-/* ---------- Astronaut and Mission control (SIMULATED) ---------- */
+/* ---------- Ops: Crew and Controller over one SIMULATED stream ---------- */
 
-function channels(sample) {
-  return Object.keys(sample).filter((k) => !META_KEYS.includes(k) && typeof sample[k] === "number");
-}
-
-function latestByCompartment() {
-  const latest = {};
-  state.telemetry.slice(0, state.step + 1).forEach((s) => { latest[s.compartment] = s; });
-  return latest;
-}
+const OPS = { steps: 180, seed: 1, compartments: ["habitat", "lab", "node"] };
 
 function stopTelemetry() {
   clearInterval(state.timer);
   state.timer = null;
 }
 
-async function startTelemetry() {
-  if (state.timer) return;
-  const picker = $("#tele-scenario");
-  const name = picker.value;
-  try {
-    const sim = await api(`/api/telemetry?scenario=${encodeURIComponent(name || "")}&seed=1&steps=60`);
-    if (!picker.options.length) sim.scenarios.forEach((s) => picker.appendChild(el("option", {}, s)));
-    picker.value = name || sim.scenarios[0];
-    state.telemetry = sim.samples;
-    state.step = 0;
-    showError(null);
-    tick();
-    state.timer = setInterval(tick, 1000);
-  } catch (err) { showError(err); }
+function startTelemetry(restart = false) {
+  if (state.timer && !restart) return;
+  stopTelemetry();
+  if (restart) state.step = 0;
+  tick();
+  state.timer = setInterval(tick, 1000);
+}
+
+function opsBody() {
+  const gravity = $("#ops-gravity").value;
+  return {
+    scenario: $("#tele-scenario").value || "nominal", seed: OPS.seed, steps: OPS.steps, step: state.step,
+    compartments: OPS.compartments, material_class: $("#material-class").value.trim() || null,
+    material_classes: state.materialClasses || {}, gravity_g: gravity === "" ? null : gravity,
+  };
 }
 
 async function tick() {
-  if (!state.telemetry.length) return;
-  state.step = Math.min(state.step + 1, state.telemetry.length - 1);
-  const latest = latestByCompartment();
-  const verdicts = {};
-  await Promise.all(Object.entries(latest).map(async ([compartment, sample]) => {
-    const history = state.telemetry.slice(0, state.step).filter((s) => s.compartment === compartment);
-    try {
-      verdicts[compartment] = await api("/api/concern", { sample, history, material_class: $("#material-class").value || "solid" });
-    } catch (err) { showError(err); }
-  }));
-  drawAstronaut(latest, verdicts);
-  drawMission(latest, verdicts);
-  if (state.step >= state.telemetry.length - 1) stopTelemetry();
+  if (state.opsBusy) return;
+  state.opsBusy = true;
+  try {
+    const view = await api("/api/ops", opsBody());
+    const picker = $("#tele-scenario");
+    if (!picker.options.length) {
+      view.scenarios.forEach((name) => picker.appendChild(el("option", {}, name)));
+      picker.value = view.scenario;
+    }
+    state.ops = view;
+    showError(null);
+    drawCrew();
+    drawController();
+    state.step += 1;
+    if (state.step >= OPS.steps) stopTelemetry();
+  } catch (err) {
+    showError(err);
+    stopTelemetry();
+  } finally {
+    state.opsBusy = false;
+  }
 }
 
-function drawAstronaut(latest, verdicts) {
-  const compartment = Object.keys(latest)[0];
-  if (!compartment) return;
-  const sample = latest[compartment];
-  const alerts = (verdicts[compartment] && verdicts[compartment].alerts) || [];
-  const flagged = new Set(alerts.map((a) => a.channel));
+function crewCompartment() {
+  const picker = $("#crew-compartment");
+  const names = Object.keys(state.ops.compartments);
+  if (picker.options.length !== names.length) {
+    const keep = picker.value;
+    picker.replaceChildren(...names.map((n) => el("option", {}, n)));
+    picker.value = names.includes(keep) ? keep : names[0];
+  }
+  return state.ops.compartments[picker.value];
+}
+
+function drawCrew() {
+  if (!state.ops) return;
+  $("#ops-clock").textContent = `t = ${state.ops.t} s of ${OPS.steps} [SIMULATED]`;
+  const room = crewCompartment();
+  if (!room) return;
+  const banner = $("#banner");
+  banner.className = `banner ${room.banner.status}`;
+  banner.textContent = room.banner.text;
   const tiles = $("#tiles");
   tiles.replaceChildren();
-  channels(sample).forEach((name) => {
-    const tile = el("div", { class: flagged.has(name) ? "tile alert" : "tile" });
-    tile.append(el("span", {}, `${name} (${compartment})`), el("b", {}, show(sample[name])));
-    tiles.appendChild(tile);
+  room.tiles.forEach((tile) => {
+    const open = state.openTile === tile.channel;
+    const button = el("button", { type: "button", class: `tile ${tile.status}`, "aria-expanded": String(open),
+      "aria-controls": "tile-detail" });
+    button.append(el("span", {}, tile.title), el("b", {}, show(tile.value)), el("span", { class: "unit" }, tile.unit),
+      el("span", { class: `chip ${tile.status}` }, tile.status));
+    button.addEventListener("click", () => {
+      state.openTile = open ? null : tile.channel;
+      drawCrew();
+    });
+    tiles.appendChild(button);
   });
-  const banner = $("#banner");
-  banner.className = alerts.length ? "banner alert" : "banner";
-  banner.textContent = alerts.length
-    ? `${alerts[0].message} [${alerts[0].label || "PLACEHOLDER"}]`
-    : `No alert in ${compartment}. Values are SIMULATED, limits PLACEHOLDER.`;
+  const detail = $("#tile-detail");
+  const chosen = room.tiles.find((t) => t.channel === state.openTile);
+  detail.hidden = !chosen;
+  if (chosen) {
+    const list = el("ul");
+    (chosen.reasons.length ? chosen.reasons : ["No alert, trend, grouped concern or evidence note for this channel."])
+      .forEach((r) => list.appendChild(el("li", {}, r)));
+    detail.replaceChildren(el("h3", {}, `${chosen.title}: ${chosen.status}`), list);
+  }
 }
 
-function drawMission(latest, verdicts) {
-  const rows = Object.entries(latest).map(([compartment, sample]) => {
-    const row = { compartment, t: sample.t };
-    channels(sample).forEach((c) => { row[c] = sample[c]; });
-    row.alerts = ((verdicts[compartment] && verdicts[compartment].alerts) || []).length;
-    return row;
+function reasoningChain(reasoning) {
+  const box = el("div", { class: "chain" });
+  const observed = Object.entries(reasoning.observed || {})
+    .filter(([k, v]) => typeof v === "number" && k !== "t").map(([k, v]) => `${k} ${show(v)}`).join(", ");
+  box.appendChild(el("p", {}, `1. Observed [SIMULATED]: ${observed}`));
+  const matched = (reasoning.matched_experiments || []).map((m) => m.why);
+  box.appendChild(el("p", {}, `2. Closest indexed experiments [DERIVED]: ${matched.join(" ") || "none"}`));
+  const findings = (reasoning.measured_findings || []).map((f) => `${f.text} (source ${f.source}, ${f.page || "page unknown"})`);
+  box.appendChild(el("p", {}, `3. Measured findings [MEASURED]: ${findings.join("; ") || "none indexed"}`));
+  box.appendChild(el("p", {}, `4. Not covered: ${(reasoning.not_covered || []).join("; ")}`));
+  box.appendChild(el("p", {}, `5. Evidence match: ${reasoning.confidence} [DERIVED]`));
+  return box;
+}
+
+function drawController() {
+  if (!state.ops) return;
+  const rooms = state.ops.compartments;
+  // Compartment table, with a material class per compartment for the evidence check.
+  const tbl = el("table");
+  const head = el("tr");
+  ["compartment", "material class", "O2 %", "pressure kPa", "CO ppm", "CO2 ppm", "smoke", "airflow cm/s", "temp C", "alerts"]
+    .forEach((h) => head.appendChild(el("th", {}, h)));
+  tbl.appendChild(head);
+  Object.entries(rooms).forEach(([name, room]) => {
+    const tr = el("tr");
+    tr.appendChild(el("td", {}, name));
+    const cell = el("td");
+    const input = el("input", { size: 8, "aria-label": `Material class for ${name}` });
+    input.value = (state.materialClasses || {})[name] || room.material_class || "";
+    input.addEventListener("change", () => { state.materialClasses = { ...(state.materialClasses || {}), [name]: input.value.trim() }; });
+    cell.appendChild(input);
+    tr.appendChild(cell);
+    const s = room.sample;
+    [s.o2_percent, s.total_pressure_kpa, s.co_ppm, s.co2_ppm, s.smoke_level, s.flow_cm_s, s.temperature_c, room.alerts.length]
+      .forEach((v) => tr.appendChild(el("td", {}, show(v))));
+    tbl.appendChild(tr);
   });
-  $("#compartments").replaceChildren(table(rows));
+  const wrap = el("div", { class: "table-wrap" });
+  wrap.appendChild(tbl);
+  if (!$("#compartments").contains(document.activeElement)) $("#compartments").replaceChildren(wrap);
+
+  // Alerts, each with its reasoning chain.
   const list = $("#alerts");
+  const openKeys = new Set([...list.querySelectorAll("details[open]")].map((d) => d.dataset.key));
   list.replaceChildren();
-  Object.entries(verdicts).forEach(([compartment, verdict]) => {
-    (verdict.alerts || []).forEach((alert) => {
-      const details = el("details");
-      details.appendChild(el("summary", {}, `${compartment}: ${alert.type} on ${alert.channel}. ${alert.message} [${alert.label || "PLACEHOLDER"}]`));
-      details.appendChild(el("pre", {}, JSON.stringify({ envelope: verdict.envelope, reasoning: verdict.reasoning }, null, 2)));
+  Object.entries(rooms).forEach(([name, room]) => {
+    room.alerts.forEach((alert) => {
+      const key = `${name}:${alert.type}:${alert.channel}`;
+      const details = el("details", { "data-key": key });
+      if (openKeys.has(key)) details.open = true;
+      details.appendChild(el("summary", {}, `${name}: ${alert.type} on ${alert.channel}. ${alert.message} [${alert.label || "DERIVED"}]`));
+      details.appendChild(reasoningChain(room.reasoning));
       list.appendChild(details);
     });
   });
   if (!list.children.length) list.appendChild(el("p", { class: "note" }, "No alerts at this step."));
+
+  // Combined view (a): evidence envelope per compartment.
+  const envelope = $("#envelope");
+  envelope.replaceChildren();
+  state.ops.combined.envelope.forEach((check) => {
+    const block = el("div", { class: check.outside && check.outside.length ? "envelope outside" : "envelope" });
+    block.appendChild(el("p", {}, check.summary));
+    const ul = el("ul");
+    Object.entries(check.axes || {}).forEach(([axis, a]) => {
+      const li = el("li");
+      li.append(el("span", { class: `gap-class ${a.class || ""}` }, a.class || "NOT SET"), ` ${a.summary}`);
+      ul.appendChild(li);
+    });
+    block.appendChild(ul);
+    envelope.appendChild(block);
+  });
+
+  // Combined view (b): co-occurring concerns, each with the alerts it groups.
+  const groups = $("#co-occurring");
+  groups.replaceChildren();
+  state.ops.combined.co_occurring.forEach((g) => {
+    const details = el("details", { open: "" });
+    const changes = Object.entries(g.changes).map(([ch, d]) => `${ch} ${d > 0 ? "+" : ""}${show(d)}`).join(", ");
+    details.appendChild(el("summary", {}, `${g.compartment}: ${g.message} Changes over ${g.window_s} s: ${changes}. [${g.label}]`));
+    const ul = el("ul");
+    g.members.forEach((m) => ul.appendChild(el("li", {}, `${m.type} on ${m.channel}: ${m.message}`)));
+    if (!g.members.length) ul.appendChild(el("li", {}, "No single-channel alert yet; the channels moved together."));
+    details.appendChild(ul);
+    groups.appendChild(details);
+  });
+  if (!groups.children.length) groups.appendChild(el("p", { class: "note" }, "No rule matched at this step."));
 }
 
 /* ---------- Builders and Researchers ---------- */
@@ -661,7 +753,11 @@ async function start() {
   });
   $("#opportunities-btn").addEventListener("click", runOpportunities);
   $("#backtest").addEventListener("submit", runBacktest);
-  $("#tele-scenario").addEventListener("change", () => { stopTelemetry(); startTelemetry(); });
+  $("#tele-scenario").addEventListener("change", () => startTelemetry(true));
+  $("#crew-compartment").addEventListener("change", drawCrew);
+  ["#material-class", "#ops-gravity"].forEach((sel) => $(sel).addEventListener("change", () => {
+    if (!state.timer) tick();
+  }));
   $("#large-text").addEventListener("click", (e) => {
     const on = document.body.classList.toggle("large");
     e.target.setAttribute("aria-pressed", on);

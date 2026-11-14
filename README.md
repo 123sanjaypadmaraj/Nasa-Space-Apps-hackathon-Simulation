@@ -119,9 +119,12 @@ python tools/eval_retrieval.py        # recall of the search over the DUMMY eval
 
 Without `--dummy`, `serve` reads `data/pyra.db` and stops with a message if it hasn't been built.
 
-Explorer is the Scenario Lab and Coverage Map; the top bar switches to Compare, Astronaut,
-Mission control, Builders and Researchers. Live values are SIMULATED and alert limits
-PLACEHOLDER (`config/alerts.json`).
+Three tabs: **Explore** (scenario, Coverage Map, coverage by axis, ranked investigations;
+a Research gaps sub-view; Compare opens as a side panel from the ranked list), **Ops**
+(Crew / Controller over one SIMULATED stream) and **Builder** (early-design evidence check).
+Export is a menu button and "Ask the evidence" is a side panel. Old view names such as
+`#astronaut` redirect to their new place. Live values are SIMULATED and alert limits and
+co-occurrence thresholds PLACEHOLDER (`config/alerts.json`).
 
 | File | Job |
 | --- | --- |
@@ -135,6 +138,7 @@ PLACEHOLDER (`config/alerts.json`).
 | `pyra/assistant.py` | Grounded assistant prompt and answer checks |
 | `pyra/telemetry.py` | SIMULATED habitat telemetry |
 | `pyra/concern.py` | Concern engine against the PLACEHOLDER limits |
+| `pyra/ops.py` | Ops tab: crew tiles and banner priority, controller combined view (evidence envelope + ILLUSTRATIVE co-occurrence rules), no aggregate score |
 | `pyra/research.py` | Weakness analysis and backtest |
 | `pyra/builder.py` | Builder assistant (`config/design_rules.json`) |
 | `pyra/mlaudit.py` | Says whether there is enough data to train a model |

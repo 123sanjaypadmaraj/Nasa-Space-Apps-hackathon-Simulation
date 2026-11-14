@@ -105,6 +105,34 @@ def telemetry(corpus, body, query):
     return {"label": "SIMULATED", "scenarios": sorted(sim.SCENARIOS), "samples": samples}
 
 
+def ops_view(corpus, body, query):
+    """body: {scenario, seed, steps, dt, step, compartments: [..], material_class or
+    material_classes: {compartment: class}, gravity_g}. Rebuilds the SIMULATED streams
+    from the seed, so the same body always gives the same answer."""
+    sim, ops = engine("telemetry"), engine("ops")
+    name = body.get("scenario") or "nominal"
+    if name not in sim.SCENARIOS:
+        raise BadRequest(f"unknown telemetry scenario '{name}', pick one of {sorted(sim.SCENARIOS)}")
+    compartments = body.get("compartments") or comma_list(DEFAULT_COMPARTMENTS)
+    if isinstance(compartments, str):
+        compartments = comma_list(compartments)
+    try:
+        seed, steps, step = int(body.get("seed", 1)), int(body.get("steps", 60)), int(body.get("step", 0))
+        dt = float(body.get("dt", 1))
+        gravity = body.get("gravity_g")
+        gravity = None if gravity in (None, "") else float(gravity)
+    except (TypeError, ValueError) as err:
+        raise BadRequest(f"seed, steps and step must be whole numbers, dt and gravity_g numbers ({err})") from err
+    if not 1 <= steps <= 3600:
+        raise BadRequest("steps must be between 1 and 3600")
+    default = body.get("material_class")
+    classes = {c: (body.get("material_classes") or {}).get(c) or default for c in compartments}
+    streams = ops.record_compartments(name, seed, steps, dt, compartments)
+    view = ops.snapshot(streams, step, corpus, classes, gravity)
+    view.update(scenario=name, scenarios=sorted(sim.SCENARIOS), steps=steps)
+    return view
+
+
 def concern(corpus, body, query):
     if "sample" not in body or not body.get("material_class"):
         raise BadRequest("concern needs a 'sample' from /api/telemetry and a 'material_class' such as 'solid'")
@@ -178,6 +206,7 @@ POST_ROUTES = {
     "/api/compare": compare,
     "/api/report": report,
     "/api/concern": concern,
+    "/api/ops": ops_view,
     "/api/builder/match": builder_match,
     "/api/research/opportunities": opportunities,
     "/api/research/backtest": backtest,

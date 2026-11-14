@@ -115,7 +115,7 @@
 
   <!-- ================= Ops ================= -->
   <section id="view-ops" class="view" hidden>
-    <div class="row">
+    <div class="row ops-bar">
       <div class="subnav" role="tablist" aria-label="Ops mode">
         <a class="subtab" href="#/ops/crew" data-sub="crew">Crew</a>
         <a class="subtab" href="#/ops/controller" data-sub="controller">Controller</a>
@@ -123,12 +123,24 @@
       <span class="badge sim">SIMULATED</span> <span class="badge ph">PLACEHOLDER limits</span>
       <label>Scenario <select id="tele-scenario"></select></label>
       <label>Material class <input id="material-class" value="solid" size="10"></label>
+      <label>Gravity for the evidence check
+        <select id="ops-gravity">
+          <option value="">not set</option><option value="0">0 g (orbit, transit)</option>
+          <option value="0.16">0.16 g (Moon)</option><option value="0.38">0.38 g (Mars)</option><option value="1">1 g</option>
+        </select>
+      </label>
+      <span class="mono note" id="ops-clock"></span>
     </div>
 
     <div id="sub-crew" class="sub astronaut">
-      <div class="row"><button type="button" id="large-text" aria-pressed="false">Large text</button></div>
-      <div id="banner" class="banner" role="status">Waiting for readings.</div>
-      <div id="tiles" class="tiles"></div>
+      <div class="row">
+        <label>Compartment <select id="crew-compartment"></select></label>
+        <button type="button" id="large-text" aria-pressed="false">Large text</button>
+      </div>
+      <div id="banner" class="banner" role="status" aria-live="polite">Waiting for readings.</div>
+      <p class="note">Tap a tile to see why it has its status.</p>
+      <div id="tiles" class="tiles crew-tiles"></div>
+      <div id="tile-detail" class="tile-detail" hidden></div>
       <h3>Checklist <span class="badge ill">ILLUSTRATIVE</span></h3>
       <ol class="checklist">
         <li>Confirm the reading on a second sensor or a portable monitor.</li>
@@ -140,8 +152,15 @@
     <div id="sub-controller" class="sub" hidden>
       <h2>All compartments</h2>
       <div id="compartments"></div>
-      <h3>Alerts <span class="badge ill">ILLUSTRATIVE reasoning</span></h3>
+      <h3>Alerts <span class="badge ph">PLACEHOLDER limits</span> <span class="badge ill">ILLUSTRATIVE reasoning</span></h3>
       <div id="alerts"></div>
+      <h3>Combined view</h3>
+      <p class="note">No aggregate score: each entry below stands on its own, with its own label.</p>
+      <h4>Evidence envelope <span class="badge der">DERIVED</span></h4>
+      <p class="note">The gap engine's combination check on each compartment's live O2, pressure, flow and gravity, for that compartment's material class.</p>
+      <div id="envelope"></div>
+      <h4>Co-occurring concerns <span class="badge ill">ILLUSTRATIVE rules</span> <span class="badge ph">PLACEHOLDER thresholds</span></h4>
+      <div id="co-occurring"></div>
     </div>
   </section>
 
