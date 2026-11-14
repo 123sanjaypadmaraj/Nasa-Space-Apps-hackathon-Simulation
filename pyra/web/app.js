@@ -100,6 +100,7 @@ function route() {
   if (tab === "ops") startTelemetry(); else stopTelemetry();
   if (tab === "explore" && sub === "coverage") drawMap();
   if (tab === "explore" && sub === "research") loadWeakness();
+  if (tab === "builder") builderBoundary(loadBuilder)();
 }
 
 function toggleDrawer(id, open) {
@@ -633,44 +634,216 @@ function drawController() {
   if (!groups.children.length) groups.appendChild(el("p", { class: "note" }, "No rule matched at this step."));
 }
 
-/* ---------- Builders and Researchers ---------- */
+/* ---------- Builder: early-design evidence check ---------- */
 
-const listOf = (text) => (text || "").split(",").map((s) => s.trim()).filter(Boolean);
+const PSI_IN_KPA = 6.894757293168; // same constant as pyra/units.py
 
-// "habitat-lab hatch; lab-node duct" -> [{from, to, type}]
-function edgesOf(text) {
-  return (text || "").split(";").map((s) => s.trim()).filter(Boolean).map((part) => {
-    const [pair, type] = part.split(/\s+/);
-    const [from, to] = pair.split("-");
-    return { from, to, type: type || "hatch" };
+// Same rules as builder.validate on the server; the server checks again, so this is only for instant messages.
+function validateBuilder(body) {
+  const errors = {};
+  const num = (key, label) => {
+    const raw = body[key];
+    if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) { errors[key] = `${label} must be a number.`; return null; }
+    return n;
+  };
+  const o2 = num("o2_percent", "O2");
+  if (o2 !== null && (o2 < 0 || o2 > 100)) errors.o2_percent = "O2 must be between 0 and 100 %.";
+  const p = num("pressure", "Pressure");
+  if (p !== null && p <= 0) errors.pressure = "Pressure must be greater than 0.";
+  const lo = num("flow_min", "Flow min"), hi = num("flow_max", "Flow max");
+  if (lo !== null && lo < 0) errors.flow_min = "Flow cannot be negative.";
+  if (hi !== null && hi < 0) errors.flow_max = "Flow cannot be negative.";
+  if (lo !== null && hi !== null && !errors.flow_min && !errors.flow_max && lo > hi) errors.flow_max = "Flow max must be at least flow min.";
+  const g = body.preset === "custom" ? num("gravity_g", "Gravity") : null;
+  if (g !== null && g < 0) errors.gravity_g = "Gravity cannot be negative.";
+  return errors;
+}
+
+function builderBody() {
+  const form = new FormData($("#builder"));
+  const body = {};
+  ["preset", "o2_percent", "pressure", "pressure_unit", "flow_min", "flow_max", "flow_unit", "gravity_g", "pillar", "mission_duration"]
+    .forEach((k) => { const v = form.get(k); if (v !== null && String(v).trim() !== "") body[k] = String(v).trim(); });
+  const picked = form.getAll("material");
+  const other = (form.get("other_materials") || "").split(",").map((m) => m.trim()).filter(Boolean);
+  body.materials = [...picked, ...other];
+  if (body.preset !== "custom") delete body.gravity_g;
+  return body;
+}
+
+function showFieldErrors(errors) {
+  document.querySelectorAll("#builder .field-error").forEach((span) => { span.textContent = ""; });
+  document.querySelectorAll("#builder input").forEach((input) => input.removeAttribute("aria-invalid"));
+  Object.entries(errors).forEach(([key, message]) => {
+    const span = document.querySelector(`#builder [data-error=${key}]`)
+      || document.querySelector(`#builder [data-field=${key}] .field-error`)
+      || document.querySelector("#builder [data-field=materials] .field-error");
+    if (span) span.textContent = message;
+    const input = document.querySelector(`#builder [name=${key}]`);
+    if (input) input.setAttribute("aria-invalid", "true");
   });
 }
 
-async function runBuilder(event) {
-  event.preventDefault();
+function drawPpo2() {
   const form = new FormData($("#builder"));
-  const body = {
-    mission: { name: form.get("mission"), environment: scenarioBody() },
-    layout: { compartments: listOf(form.get("compartments")).map((id) => ({ id })), edges: edgesOf(form.get("edges")) },
-    equipment: listOf(form.get("equipment")).map((name) => ({ name })),
-    materials: listOf(form.get("materials")).map((name) => ({ name })),
-    maintenance: listOf(form.get("maintenance")).map((task) => ({ task })),
-  };
+  const o2 = Number(form.get("o2_percent")), p = Number(form.get("pressure"));
+  const filled = String(form.get("o2_percent") || "").trim() !== "" && String(form.get("pressure") || "").trim() !== "";
+  const kpa = form.get("pressure_unit") === "psi" ? p * PSI_IN_KPA : p;
+  const ok = filled && Number.isFinite(o2 * kpa) && o2 >= 0 && o2 <= 100 && p > 0;
+  $("#b-ppo2").value = ok ? (o2 / 100 * kpa).toFixed(2) : "set a valid O2 and pressure";
+}
+
+function applyPreset() {
+  const preset = (state.builderOptions.presets || []).find((p) => p.id === $("#b-preset").value);
+  if (!preset) return;
+  const form = $("#builder");
+  const gravity = form.elements.gravity_g;
+  gravity.readOnly = preset.id !== "custom";
+  if (preset.id !== "custom") gravity.value = preset.gravity_g ?? "";
+  if (preset.o2_percent !== null && preset.o2_percent !== undefined) form.elements.o2_percent.value = preset.o2_percent;
+  if (preset.pressure !== null && preset.pressure !== undefined) {
+    form.elements.pressure.value = preset.pressure;
+    form.querySelectorAll("[name=pressure_unit]").forEach((r) => { r.checked = r.value === preset.pressure_unit; });
+  }
+  const verified = preset.verified_by ? `verified by ${preset.verified_by}` : "not yet verified by the team";
+  const atmosphere = preset.o2_percent === null ? "No cited atmosphere for this preset; type your own." : `Atmosphere: ${preset.atmosphere_source.replace(/\.$/, "")}.`;
+  $("#b-preset-note").textContent = `Gravity: ${preset.gravity_source.replace(/\.$/, "")}. ${atmosphere} (${verified})`;
+  drawPpo2();
+}
+
+function chip(cell) {
+  if (!cell || cell.state === "NOT_EVALUATED") return el("span", { class: "gap-class unset" }, "not set");
+  return el("span", { class: `gap-class ${cell.class}`, title: cell.summary }, cell.class);
+}
+
+function drawHints(hints) {
+  document.querySelectorAll("#builder .hint").forEach((h) => h.replaceChildren());
+  Object.entries(hints || {}).forEach(([field, cell]) => {
+    const span = document.querySelector(`#builder [data-hint=${field}]`) || document.querySelector(`#builder [data-field=${field}] .hint`);
+    if (!span || cell.state === "NOT_EVALUATED") return;
+    span.append(el("span", { class: "badge hyp" }, "HYPOTHETICAL"), " ", chip(cell), " ", cell.summary);
+  });
+}
+
+function drawBuilderResult(found) {
   const out = $("#builder-out");
-  try {
-    const found = await api("/api/builder/match", body);
-    showError(null);
-    const checklist = found.checklist.map((item) => ({
-      subject: item.subject,
-      guidance: Array.isArray(item.guidance) ? item.guidance.map((g) => `${g.text} (${g.source}, ${g.page})`).join(" | ") : item.guidance,
-      label: item.label,
-    }));
-    out.replaceChildren(
-      el("h3", {}, "Materials match (environment from the Scenario Lab, HYPOTHETICAL)"), table(found.materials),
-      el("h3", {}, "Design checklist (ILLUSTRATIVE)"), table(checklist),
-      el("h3", {}, `Compartments (${found.compartments.label})`), table(found.compartments.compartments),
-    );
-  } catch (err) { showError(err); }
+  drawHints(found.hints);
+  const parts = [];
+  const head = el("p", { class: "note" });
+  head.append(el("span", { class: "badge hyp" }, "HYPOTHETICAL"), ` inputs, `, el("span", { class: "badge der" }, "DERIVED"),
+    ` coverage. O2 partial pressure: ${found.derived.o2_partial_kpa === null ? "not computed (O2 or pressure not set)" : found.derived.o2_partial_kpa + " kPa"}.`
+    + (found.mission_duration ? ` Mission duration: ${found.mission_duration} (label only).` : ""));
+  parts.push(el("h3", {}, "Materials × axis coverage"), head);
+
+  const tbl = el("table", { class: "coverage-table" });
+  const hr = el("tr");
+  ["Material", "O2", "Pressure", "Flow (min / max)", "Gravity", "Material class", "Pillar", "All together", "Nearest evidence"]
+    .forEach((h) => hr.appendChild(el("th", { scope: "col" }, h)));
+  tbl.appendChild(hr);
+  found.table.forEach((row) => {
+    const tr = el("tr");
+    const name = el("td");
+    name.append(el("strong", {}, row.material), row.in_index ? "" : el("div", { class: "note" }, "not in index"));
+    tr.appendChild(name);
+    ["o2_percent", "pressure"].forEach((k) => { const td = el("td"); td.appendChild(chip(row[k])); tr.appendChild(td); });
+    const flow = el("td");
+    row.flow.forEach((f, i) => { if (i) flow.append(" / "); flow.appendChild(chip(f)); });
+    tr.appendChild(flow);
+    ["gravity", "material_class", "pillar"].forEach((k) => { const td = el("td"); td.appendChild(chip(row[k])); tr.appendChild(td); });
+    const combo = el("td");
+    row.combination.forEach((c, i) => { if (i) combo.append(" / "); combo.appendChild(chip({ class: c.class, state: c.class ? "EVALUATED" : "NOT_EVALUATED", summary: c.summary })); });
+    tr.appendChild(combo);
+    const near = el("td");
+    if (row.nearest) {
+      const label = `${row.nearest.acronym}${row.nearest.run_id ? " / " + row.nearest.run_id : ""}`;
+      near.append(el("span", { class: "badge mea" }, "MEASURED"), ` ${label}: `);
+      if (row.nearest.url) near.appendChild(el("a", { href: row.nearest.url, target: "_blank", rel: "noopener" }, row.nearest.source || "source"));
+      else near.append(row.nearest.source || "source title not indexed");
+    } else near.append("no indexed evidence");
+    tr.appendChild(near);
+    tbl.appendChild(tr);
+  });
+  const wrap = el("div", { class: "table-wrap" });
+  wrap.appendChild(tbl);
+  parts.push(wrap, el("p", { class: "note" }, "Hover a class to read the full line. Flow is checked at both ends of the range."));
+
+  parts.push(el("h3", {}, "Suggested experiments"));
+  const proposals = el("ul");
+  found.proposals.forEach((p) => {
+    const li = el("li");
+    li.append(el("span", { class: "badge pro" }, "PROPOSAL"), " ", p.text.replace(/^PROPOSAL:\s*/, ""));
+    proposals.appendChild(li);
+  });
+  if (!found.proposals.length) proposals.appendChild(el("li", { class: "note" }, "No gap to propose an experiment for."));
+  parts.push(proposals);
+
+  parts.push(el("h3", {}, "Design notes"));
+  const notes = el("ul");
+  found.design_notes.forEach((n) => {
+    const li = el("li");
+    if (Array.isArray(n.guidance)) {
+      li.append(el("strong", {}, `${n.subject}: `), n.guidance.map((g) => `${g.text} [${g.source}, ${g.page}]`).join(" | "));
+    } else {
+      li.append(el("strong", {}, `${n.subject}: `), n.guidance);
+    }
+    notes.appendChild(li);
+  });
+  parts.push(notes);
+  out.replaceChildren(...parts);
+}
+
+// Error boundary: nothing thrown while checking or drawing reaches the page as a crash.
+function builderBoundary(fn) {
+  return async (...args) => {
+    const box = $("#builder-boundary");
+    try {
+      box.hidden = true;
+      await fn(...args);
+    } catch (err) {
+      console.error("[PYRA builder]", err);
+      box.textContent = `The Builder hit a problem and stopped this check: ${err.message}. Your inputs are kept; change a field and try again.`;
+      box.hidden = false;
+    }
+  };
+}
+
+async function runBuilder(event) {
+  if (event) event.preventDefault();
+  const body = builderBody();
+  const errors = validateBuilder(body);
+  showFieldErrors(errors);
+  if (Object.keys(errors).length) {
+    drawHints({});
+    $("#builder-out").replaceChildren(el("p", { class: "note" }, "Fix the highlighted fields to see coverage."));
+    return;
+  }
+  const found = await api("/api/builder/check", body);
+  if (!found.valid) {
+    showFieldErrors(found.errors);
+    drawHints({});
+    $("#builder-out").replaceChildren(el("p", { class: "note" }, "Fix the highlighted fields to see coverage."));
+    return;
+  }
+  drawBuilderResult(found);
+}
+
+async function loadBuilder() {
+  if (state.builderOptions) return;
+  state.builderOptions = await api("/api/builder/options");
+  const presetPicker = $("#b-preset");
+  presetPicker.replaceChildren(...state.builderOptions.presets.map((p) => el("option", { value: p.id }, p.name)));
+  const box = $("#b-materials");
+  box.replaceChildren(...state.builderOptions.materials.map((m) => {
+    const label = el("label");
+    label.append(el("input", { type: "checkbox", name: "material", value: m.category }),
+      ` ${m.category} `, el("span", { class: "note" }, `(${m.investigations} inv, ${m.runs} runs)`));
+    return label;
+  }));
+  if (!state.builderOptions.materials.length) box.appendChild(el("p", { class: "note" }, "No material classes indexed yet."));
+  presetPicker.value = "custom";
+  applyPreset();
 }
 
 async function loadWeakness() {
@@ -744,7 +917,10 @@ async function start() {
   $("#report-btn").addEventListener("click", openReport);
   $("#report-menu").addEventListener("click", (e) => { e.target.closest("details").open = false; openReport(); });
   $("#compare-btn").addEventListener("click", runCompare);
-  $("#builder").addEventListener("submit", runBuilder);
+  const checkBuilder = builderBoundary(runBuilder);
+  $("#builder").addEventListener("submit", checkBuilder);
+  $("#builder").addEventListener("input", builderBoundary(async () => { drawPpo2(); showFieldErrors(validateBuilder(builderBody())); }));
+  $("#b-preset").addEventListener("change", builderBoundary(async () => { applyPreset(); await runBuilder(); }));
   $("#ask").addEventListener("submit", runAsk);
   $("#ask-toggle").addEventListener("click", () => toggleDrawer("ask-panel"));
   document.querySelectorAll(".drawer-close").forEach((b) => b.addEventListener("click", () => toggleDrawer(b.dataset.close, false)));

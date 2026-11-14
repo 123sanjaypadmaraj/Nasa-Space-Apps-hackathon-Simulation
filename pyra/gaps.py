@@ -131,7 +131,10 @@ def category_key(material):
     """The category a material name is counted under: its MATERIAL_CLASSES group, else its own name."""
     if not material or not str(material).strip():
         return None
-    return ranking.material_class(material) or str(material).strip().lower()
+    text = str(material).strip().lower()
+    if text in ranking.MATERIAL_CLASSES:  # a class name picked as-is ("gas fuel" must not become "liquid fuel")
+        return text
+    return ranking.material_class(material) or text
 
 
 def _points(corpus):

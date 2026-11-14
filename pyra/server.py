@@ -171,15 +171,13 @@ def backtest(corpus, body, query):
     return engine("research").backtest(corpus, cutoff, years, checks)
 
 
-def builder_match(corpus, body, query):
-    """body: mission {name, environment}, layout {compartments, edges}, equipment, materials, maintenance."""
-    try:
-        return engine("builder").assess(body.get("mission") or {"name": None, "environment": {}},
-                                        body.get("layout") or {"compartments": [], "edges": []},
-                                        body.get("equipment") or [], body.get("materials") or [],
-                                        body.get("maintenance") or [], corpus)
-    except (KeyError, ValueError) as err:
-        raise BadRequest(f"design is incomplete or inconsistent: {err}") from err
+def builder_options(corpus, body, query):
+    return engine("builder").options(corpus)
+
+
+def builder_check(corpus, body, query):
+    """body: the Builder form. Invalid values come back as {"valid": false, "errors": {...}}."""
+    return engine("builder").check(body, corpus)
 
 
 def ask(corpus, body, query):
@@ -200,6 +198,7 @@ GET_ROUTES = {
     "/api/runs": lambda corpus, body, query: corpus["runs"],
     "/api/telemetry": telemetry,
     "/api/research/weakness": weakness,
+    "/api/builder/options": builder_options,
 }
 POST_ROUTES = {
     "/api/coverage": coverage,
@@ -207,7 +206,7 @@ POST_ROUTES = {
     "/api/report": report,
     "/api/concern": concern,
     "/api/ops": ops_view,
-    "/api/builder/match": builder_match,
+    "/api/builder/check": builder_check,
     "/api/research/opportunities": opportunities,
     "/api/research/backtest": backtest,
     "/api/ask": ask,

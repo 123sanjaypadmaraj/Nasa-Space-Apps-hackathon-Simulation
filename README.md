@@ -140,6 +140,6 @@ co-occurrence thresholds PLACEHOLDER (`config/alerts.json`).
 | `pyra/concern.py` | Concern engine against the PLACEHOLDER limits |
 | `pyra/ops.py` | Ops tab: crew tiles and banner priority, controller combined view (evidence envelope + ILLUSTRATIVE co-occurrence rules), no aggregate score |
 | `pyra/research.py` | Weakness analysis and backtest |
-| `pyra/builder.py` | Builder assistant (`config/design_rules.json`) |
+| `pyra/builder.py` | Builder early-design evidence check: environment presets (`config/environment_presets.json`, sources not yet verified), validation, materials × axis table, cited design notes (`config/design_rules.json`) |
 | `pyra/mlaudit.py` | Says whether there is enough data to train a model |
 | `pyra/server.py`, `pyra/web/` | Standard-library web server, JSON API and the page |

@@ -114,6 +114,20 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(caught.exception.code, 400)
         caught.exception.close()
 
+    def test_builder_options_and_empty_check(self):
+        _, body = self.get("/api/builder/options")
+        options = json.loads(body)
+        self.assertIn("Check what NASA combustion evidence covers", options["purpose"])
+        self.assertEqual(options["presets"][-1]["id"], "custom")
+        found = self.post("/api/builder/check", {})
+        self.assertTrue(found["valid"])
+
+    def test_builder_invalid_values_are_messages_not_errors(self):
+        found = self.post("/api/builder/check", {"o2_percent": 140, "flow_min": 5, "flow_max": 1})
+        self.assertFalse(found["valid"])
+        self.assertEqual(set(found["errors"]), {"o2_percent", "flow_max"})
+        self.assertNotIn("table", found)
+
     def test_files_outside_the_web_folder_are_refused(self):
         with self.assertRaises(HTTPError) as caught:
             self.get("/../server.py")
