@@ -112,6 +112,8 @@ def opportunities(corpus, mission_atmospheres, weights=None):
         relevance = mission.get("relevance", weights["default_relevance"])
         analysis = gaps.analyze(corpus, evidence.scenario(mission["scenario"]))
         for axis, gap in analysis["axes"].items():
+            if gap.get("state") == "NOT_EVALUATED":
+                continue  # an unset axis is not a gap
             size = weights["gap_size"].get(gap["class"], 0.0)
             cost = weights["data_cost"].get(axis, 1.0)
             if size == 0:

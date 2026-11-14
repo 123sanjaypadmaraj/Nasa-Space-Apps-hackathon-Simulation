@@ -87,5 +87,125 @@ class TestAnalyze(unittest.TestCase):
                                               "material_class", "pillar"})
 
 
+def range_investigation(number, material="PMMA", **ranges):
+    """DUMMY - NOT REAL DATA. An investigation with reported ranges and no test runs."""
+    return {"id": number, "acronym": f"DUMMY-R{number}", "scale": "bench", "pillar": "prevention",
+            "fuels": [{"phase": "solid", "material": material}],
+            "ranges": {q: {"min": lo, "max": hi, "from_words": False} for q, (lo, hi) in ranges.items()}}
+
+
+class TestAxisState(unittest.TestCase):
+
+    def test_unset_axis_is_not_evaluated_and_listed_as_skipped(self):
+        runs = [dummy_run(f"R{n}", 0.0) for n in range(3)]
+        found = gaps.analyze(corpus(*runs), scenario(gravity_g=0.0, pressure=None, pillar=None))
+        self.assertEqual(found["axes"]["pressure"]["state"], "NOT_EVALUATED")
+        self.assertIsNone(found["axes"]["pressure"]["class"])
+        self.assertEqual(found["combination"]["skipped_axes"], ["pressure", "pillar"])
+        self.assertEqual(found["skipped_axes"], ["pressure", "pillar"])
+        self.assertNotIn("pressure", found["combination"]["evaluated_axes"])
+
+    def test_not_evaluated_is_not_a_coverage_class(self):
+        self.assertNotIn("NOT_EVALUATED", gaps.COVERAGE_CLASSES)
+        self.assertEqual(len(gaps.COVERAGE_CLASSES), 6)
+
+    def test_unset_axis_does_not_change_the_combination(self):
+        runs = [dummy_run(f"R{n}", 0.0) for n in range(3)]
+        found = gaps.analyze(corpus(*runs), scenario(gravity_g=0.0, pressure=None))
+        self.assertEqual(found["combination"]["class"], "DIRECTLY_TESTED")
+
+    def test_nothing_set_is_not_evaluated_not_directly_tested(self):
+        runs = [dummy_run(f"R{n}", 0.0) for n in range(3)]
+        found = gaps.analyze(corpus(*runs), evidence.scenario({}))
+        self.assertEqual(found["combination"]["state"], "NOT_EVALUATED")
+        self.assertIsNone(found["combination"]["class"])
+        self.assertEqual(found["combination"]["runs_matching"], [])
+        self.assertEqual(len(found["skipped_axes"]), 6)
+
+
+class TestNumericAxis(unittest.TestCase):
+
+    def test_moon_with_only_microgravity_data_is_one_sided(self):
+        runs = [dummy_run(f"R{n}", g) for n, g in enumerate([0.0, 0.0, 0.01, 0.0])]
+        gravity = gaps.analyze(corpus(*runs), scenario(gravity_g=0.16))["axes"]["gravity"]
+        self.assertEqual(gravity["class"], "ONE_SIDED")
+        self.assertEqual(gravity["side"], "above")
+        self.assertEqual(gravity["kind"], "numeric")
+        self.assertEqual((gravity["tested_min"], gravity["tested_max"], gravity["unit"]), (0.0, 0.01, "g"))
+        self.assertAlmostEqual(gravity["gap_to_nearest"], 0.15)
+        self.assertAlmostEqual(gravity["distance"], 3.0)
+        self.assertEqual(gravity["runs_within"], 0)
+        self.assertEqual(gravity["runs_tested"], 4)
+
+    def test_moon_between_zero_and_one_g_is_bounded_on_both_sides(self):
+        runs = [dummy_run(f"R{n}", g) for n, g in enumerate([0.0, 0.0, 1.0])]
+        gravity = gaps.analyze(corpus(*runs), scenario(gravity_g=0.16))["axes"]["gravity"]
+        self.assertEqual(gravity["class"], "BOUNDED")
+        self.assertEqual(gravity["side"], "both")
+        self.assertEqual((gravity["nearest_below"], gravity["nearest_above"]), (0.0, 1.0))
+
+    def test_scenario_below_every_tested_value(self):
+        runs = [dummy_run(f"R{n}", 0.0, o2_percent=o2) for n, o2 in enumerate([30.0, 35.0])]
+        o2 = gaps.analyze(corpus(*runs), scenario(gravity_g=0.0, o2_percent=21))["axes"]["o2_percent"]
+        self.assertEqual((o2["class"], o2["side"]), ("ONE_SIDED", "below"))
+
+    def test_bounded_docstring_says_it_is_about_conditions_not_outcomes(self):
+        self.assertIn("non-monotonic", gaps.__doc__)
+        self.assertIn("between tested conditions", gaps.classify_axis.__doc__)
+
+
+class TestPrecedence(unittest.TestCase):
+
+    def test_two_runs_within_tolerance_with_min_three_is_insufficient(self):
+        runs = [dummy_run("A", 0.0, o2_percent=21.0), dummy_run("B", 0.0, o2_percent=21.5),
+                dummy_run("C", 0.0, o2_percent=15.0), dummy_run("D", 0.0, o2_percent=30.0)]
+        found = gaps.analyze(corpus(*runs), scenario(gravity_g=0.0), min_runs=3)
+        o2 = found["axes"]["o2_percent"]
+        self.assertEqual(o2["class"], "INSUFFICIENT")
+        self.assertEqual(o2["runs_within"], 2)
+        self.assertEqual(o2["side"], "within")
+        self.assertEqual(found["combination"]["class"], "INSUFFICIENT")
+
+    def test_ranges_alone_never_make_directly_tested(self):
+        invs = [range_investigation(n, o2_percent=(20.5, 21.5), pressure=(100.0, 102.0),
+                                    flow_speed=(9.0, 11.0), gravity=(0.0, 0.0)) for n in range(1, 6)]
+        found = gaps.analyze({"investigations": invs, "runs": []}, scenario(gravity_g=0.0))
+        for axis in ("o2_percent", "pressure", "flow_speed", "gravity", "material_class", "pillar"):
+            self.assertNotEqual(found["axes"][axis]["class"], "DIRECTLY_TESTED", axis)
+        self.assertEqual(found["axes"]["o2_percent"]["class"], "INSUFFICIENT")
+        self.assertNotEqual(found["combination"]["class"], "DIRECTLY_TESTED")
+        self.assertEqual(found["combination"]["runs_matching"], [])
+        self.assertEqual(found["nearest_runs"], [])
+
+    def test_range_spanning_the_scenario_is_bounded(self):
+        invs = [range_investigation(1, o2_percent=(15.0, 30.0))]
+        o2 = gaps.analyze({"investigations": invs, "runs": []}, scenario(gravity_g=0.0))["axes"]["o2_percent"]
+        self.assertEqual((o2["class"], o2["range_investigations"]), ("BOUNDED", 1))
+
+
+class TestCategoricalAxis(unittest.TestCase):
+
+    def test_categories_with_counts_and_no_distance(self):
+        runs = [dummy_run(f"R{n}", 0.0) for n in range(3)]
+        runs.append(dict(dummy_run("C1", 0.0), materials=["cellulose"], investigation_id=2))
+        invs = [{"id": 1}, {"id": 2}, range_investigation(3, material="Kimwipe paper")]
+        found = gaps.analyze({"investigations": invs, "runs": runs}, scenario(gravity_g=0.0))
+        material = found["axes"]["material_class"]
+        self.assertEqual(material["kind"], "categorical")
+        self.assertEqual(material["categories"], [
+            {"category": "plastic", "investigations": 1, "runs": 3},
+            {"category": "paper", "investigations": 2, "runs": 1}])
+        self.assertTrue(material["in_tested"])
+        for key in ("distance", "tested_min", "tested_max", "side", "gap_to_nearest"):
+            self.assertNotIn(key, material)
+
+    def test_unindexed_material_has_no_indexed_data(self):
+        runs = [dummy_run(f"R{n}", 0.0) for n in range(3)]
+        material = gaps.analyze(corpus(*runs), scenario(gravity_g=0.0, material="unobtainium"))["axes"]["material_class"]
+        self.assertEqual(material["class"], "NO_INDEXED_DATA")
+        self.assertFalse(material["in_tested"])
+        self.assertEqual(material["scenario_value"], "unobtainium")
+
+
 if __name__ == "__main__":
     unittest.main()
