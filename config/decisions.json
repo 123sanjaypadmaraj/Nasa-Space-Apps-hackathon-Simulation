@@ -1,0 +1,47 @@
+{
+  "_note": "Team decisions from Phase 0. These are our own engineering choices (DERIVED), not NASA data. Put your name in confirmed_by once the team agrees.",
+
+  "database": {
+    "value": "sqlite",
+    "why": "One file, no server to install. Easy to share and demo.",
+    "confirmed_by": ""
+  },
+  "search_store": {
+    "value": "in-memory",
+    "why": "We will index fewer than 50 papers, so a simple in-memory index is enough. Move to FAISS only if it gets slow.",
+    "confirmed_by": ""
+  },
+  "ranking_weights": {
+    "value": {
+      "atmosphere": 0.25,
+      "gravity": 0.20,
+      "material": 0.20,
+      "flow": 0.10,
+      "objective": 0.10,
+      "scale": 0.10,
+      "measurement": 0.05
+    },
+    "why": "Atmosphere, gravity and material matter most for the Moon habitat question. The weights must add up to 1.",
+    "confirmed_by": ""
+  },
+  "gap_tolerances": {
+    "value": {
+      "o2_percent_points": 2,
+      "pressure_kpa": 7,
+      "flow_cm_s": 5,
+      "gravity_g": 0.05
+    },
+    "why": "How close a test has to be to count as 'directly tested'. 7 kPa is about 1 psi. These are starting guesses, so change them after looking at the real data.",
+    "confirmed_by": ""
+  },
+  "min_runs_for_sufficient": {
+    "value": 3,
+    "why": "Fewer than 3 runs near the scenario counts as INSUFFICIENT.",
+    "confirmed_by": ""
+  },
+  "assistant_word_limit": {
+    "value": 250,
+    "why": "Keeps the assistant's answers short and easy to check.",
+    "confirmed_by": ""
+  }
+}
