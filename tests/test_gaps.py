@@ -207,5 +207,51 @@ class TestCategoricalAxis(unittest.TestCase):
         self.assertEqual(material["scenario_value"], "unobtainium")
 
 
+class TestPanelLines(unittest.TestCase):
+
+    def test_numeric_line(self):
+        runs = [dummy_run(f"R{n}", 0.0, o2_percent=v) for n, v in enumerate([15.0, 18.0, 21.0])]
+        o2 = gaps.analyze(corpus(*runs), scenario(gravity_g=0.0, o2_percent=34))["axes"]["o2_percent"]
+        self.assertEqual(o2["summary"], "Tested 15–21 % (3 runs). Yours 34 % → 13 points above (one-sided).")
+
+    def test_categorical_line(self):
+        runs = [dict(dummy_run(f"C{n}", 0.0), materials=["cellulose"], investigation_id=1 + n % 2)
+                for n in range(14)]
+        runs += [dict(dummy_run(f"P{n}", 0.0), investigation_id=3) for n in range(6)]
+        invs = [{"id": 1}, {"id": 2}, {"id": 3}]
+        found = gaps.analyze({"investigations": invs, "runs": runs}, scenario(gravity_g=0.0, material="silicone rubber"))
+        self.assertEqual(found["axes"]["material_class"]["summary"],
+                         "Tested: paper (2 inv, 14 runs), plastic (1, 6). "
+                         "Yours: silicone rubber (plastic) → 6 runs (directly tested).")
+        found = gaps.analyze({"investigations": invs, "runs": runs}, scenario(gravity_g=0.0, material="unobtainium"))
+        self.assertTrue(found["axes"]["material_class"]["summary"].endswith(
+            "Yours: unobtainium → no indexed data."))
+
+    def test_unset_line(self):
+        found = gaps.analyze(corpus(dummy_run("R0", 0.0)), scenario(gravity_g=0.0, flow_speed=None))
+        self.assertEqual(found["axes"]["flow_speed"]["summary"], "Flow: not set. Choose one to check coverage.")
+
+    def test_bounded_line_names_both_sides(self):
+        runs = [dummy_run(f"R{n}", g) for n, g in enumerate([0.0, 1.0])]
+        line = gaps.analyze(corpus(*runs), scenario(gravity_g=0.16))["axes"]["gravity"]["summary"]
+        self.assertIn("between tested 0 and 1 g", line)
+        self.assertIn("bounded by tested conditions", line)
+
+    def test_never_says_not_provided(self):
+        ranged = {"investigations": [range_investigation(1, o2_percent=(20.0, 22.0))], "runs": []}
+        words = corpus(*[dummy_run(f"W{n}", 0.0, words=["gravity"]) for n in range(3)])
+        plain = corpus(*[dummy_run(f"R{n}", 0.0) for n in range(2)])
+        cases = [(plain, {}), (plain, {"gravity_g": 0.16}), (plain, {"gravity_g": 0.0, "scale": "spacecraft-scale"}),
+                 (words, {"gravity_g": 0.0}), (ranged, {"gravity_g": 0.16}), (corpus(), {"gravity_g": 0.16}),
+                 (plain, {"gravity_g": 0.0, "material": "unobtainium", "pillar": "detection"}),
+                 (evidence.load(evidence.dummy_conn()), {"gravity_g": 0.38, "pressure": None})]
+        for data, raw in cases:
+            found = gaps.analyze(data, evidence.scenario(raw) if not raw or "o2_percent" in raw else scenario(**raw))
+            lines = [a["summary"] for a in found["axes"].values()] + [found["combination"]["summary"]]
+            for line in lines:
+                self.assertNotIn("not provided", line, raw)
+                self.assertNotIn("None", line, raw)
+
+
 if __name__ == "__main__":
     unittest.main()

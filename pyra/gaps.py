@@ -343,6 +343,103 @@ def _sentence(axis, found, min_runs):
     return f"{name}: no indexed data for {shown}."
 
 
+def _num(value):
+    """Short display of a number: 21.0 -> '21', 101.325 -> '101.3', 0.16 -> '0.16'."""
+    return f"{value:.4g}"
+
+
+def _plural(count, word):
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
+def _amount(value, unit):
+    """A distance on the axis in words: '13 points' for %, '6.2 kPa' otherwise."""
+    shown = _num(value)
+    return f"{shown} point{'' if shown == '1' else 's'}" if unit == "%" else f"{shown} {unit}"
+
+
+def _tested_numeric(found):
+    unit = found["unit"]
+    low, high = found["tested_min"], found["tested_max"]
+    span = f"{_num(low)} {unit}" if low == high else f"{_num(low)}–{_num(high)} {unit}"
+    runs, ranges = found["runs_tested"], found["range_investigations"]
+    if not runs and not ranges:
+        return f"Tested {span} at other scales only."
+    counts = [_plural(runs, "run")] if runs else ["no runs"]
+    if ranges:
+        counts.append(_plural(ranges, "investigation range"))
+    return f"Tested {span} ({', '.join(counts)})."
+
+
+def _yours_numeric(found, min_runs):
+    unit, gap = found["unit"], found["class"]
+    yours = f"Yours {_num(found['scenario_value'])} {unit}"
+    tolerance = f"±{_num(found['tolerance'])} {unit}"
+    if gap == DIRECTLY_TESTED:
+        return f"{yours} → {_plural(found['runs_within'], 'run')} within {tolerance} (directly tested)."
+    if gap == INSUFFICIENT and found["runs_within"]:
+        return (f"{yours} → {_plural(found['runs_within'], 'run')} within {tolerance}, "
+                f"{min_runs} needed (insufficient).")
+    if gap == INSUFFICIENT:
+        return f"{yours} → only investigation ranges reach it, no runs within {tolerance} (insufficient)."
+    if gap == BOUNDED:
+        return (f"{yours} → between tested {_num(found['nearest_below'])} and {_num(found['nearest_above'])} {unit}, "
+                f"{_amount(found['gap_to_nearest'], unit)} from the nearest (bounded by tested conditions, "
+                f"not by outcomes).")
+    if gap == ONE_SIDED:
+        return f"{yours} → {_amount(found['gap_to_nearest'], unit)} {found['side']} (one-sided)."
+    return f"{yours} → nearby values come from words or another scale (not comparable)."
+
+
+def _tested_categories(found):
+    categories = found["categories"]
+    if not categories:
+        return "Tested: none indexed."
+    first, rest = categories[0], categories[1:]
+    parts = [f"{first['category']} ({first['investigations']} inv, {_plural(first['runs'], 'run')})"]
+    parts += [f"{c['category']} ({c['investigations']}, {c['runs']})" for c in rest]
+    return f"Tested: {', '.join(parts)}."
+
+
+def _yours_category(found, min_runs):
+    target, typed = found["scenario_value"], found.get("scenario_input")
+    shown = f"{typed} ({target})" if typed and typed.strip().lower() != target else target
+    gap, runs = found["class"], found["runs_within"]
+    if gap == DIRECTLY_TESTED:
+        result = f"{_plural(runs, 'run')} (directly tested)"
+    elif gap == INSUFFICIENT and runs:
+        result = f"{_plural(runs, 'run')}, {min_runs} needed (insufficient)"
+    elif gap == INSUFFICIENT:
+        result = "investigation-level data only, no runs (insufficient)"
+    elif gap == NOT_COMPARABLE:
+        result = "data from another scale only (not comparable)"
+    else:
+        result = "no indexed data"
+    return f"Yours: {shown} → {result}."
+
+
+def panel_line(axis, found, min_runs):
+    """The one line the gap panel shows for an axis. Never contains 'not provided'."""
+    if found["state"] == NOT_EVALUATED:
+        return f"{AXIS_NAMES[axis]}: not set. Choose one to check coverage."
+    if found["kind"] == CATEGORICAL:
+        return f"{_tested_categories(found)} {_yours_category(found, min_runs)}"
+    if found["class"] == NO_INDEXED_DATA:
+        return f"No indexed tests. Yours {_num(found['scenario_value'])} {found['unit']}."
+    return f"{_tested_numeric(found)} {_yours_numeric(found, min_runs)}"
+
+
+def combination_line(combination):
+    if combination["state"] == NOT_EVALUATED:
+        return "All axes together: nothing set yet. Choose at least one axis to check coverage."
+    runs = len(combination["runs_matching"])
+    line = (f"All set axes together: {combination['class']}. "
+            f"{runs} run{' matches' if runs == 1 else 's match'} every set axis at once.")
+    if combination["skipped_axes"]:
+        line += " Not set: " + ", ".join(AXIS_NAMES[a] for a in combination["skipped_axes"]) + "."
+    return line
+
+
 def _skipped(axis):
     return {"state": NOT_EVALUATED, "kind": NUMERIC if axis in NUMERIC_AXES else CATEGORICAL,
             "class": None, "unit": NUMERIC_AXES.get(axis, (None, None))[1]}
@@ -370,6 +467,9 @@ def analyze(corpus, scen, tolerances=None, min_runs=None):
             axes[axis] = _numeric_axis(points, axis, target, by_axis[axis], min_runs, scen)
         else:
             axes[axis] = _category_axis(points, axis, target, min_runs, scen)
+            if axis == "material_class":
+                axes[axis]["scenario_input"] = scen.get("material")
+        axes[axis]["summary"] = panel_line(axis, axes[axis], min_runs)
 
     skipped = [a for a in AXES if axes[a]["state"] == NOT_EVALUATED]
     evaluated = [a for a in AXES if axes[a]["state"] == EVALUATED]
@@ -388,6 +488,7 @@ def analyze(corpus, scen, tolerances=None, min_runs=None):
             combined = INSUFFICIENT if worst == DIRECTLY_TESTED else worst
         combination = {"state": EVALUATED, "class": combined, "runs_matching": fits,
                        "skipped_axes": skipped, "evaluated_axes": evaluated}
+    combination["summary"] = combination_line(combination)
 
     report = [_sentence(a, axes[a], min_runs) for a in AXES]
     if combination["state"] == EVALUATED:

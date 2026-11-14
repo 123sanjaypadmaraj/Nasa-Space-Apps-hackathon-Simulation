@@ -219,7 +219,11 @@ function drawLegend() {
 
 function scenarioBody() {
   const form = new FormData($("#scenario"));
-  return Object.fromEntries([...form.entries()].filter(([, v]) => v !== ""));
+  const body = Object.fromEntries([...form.entries()].filter(([, v]) => v !== ""));
+  // Gravity is a slider, so it always has a value; "set" decides whether it is sent.
+  if (!body.gravity_set) delete body.gravity_g;
+  delete body.gravity_set;
+  return body;
 }
 
 async function runCoverage() {
@@ -235,21 +239,45 @@ async function runCoverage() {
   drawRanked();
 }
 
+// Which scenario input sets each gap axis, so an unset axis line can open it.
+const AXIS_INPUT = {
+  o2_percent: "o2_percent", pressure: "pressure", flow_speed: "flow_speed",
+  gravity: "gravity_g", material_class: "material", pillar: "pillar",
+};
+const AXIS_LABEL = {
+  o2_percent: "O2", pressure: "Pressure", flow_speed: "Flow", gravity: "Gravity",
+  material_class: "Material", pillar: "Pillar",
+};
+
+function openAxisInput(axis) {
+  if (axis === "gravity") $("#scenario [name=gravity_set]").checked = true;
+  const input = $(`#scenario [name=${AXIS_INPUT[axis]}]`);
+  if (!input) return;
+  input.disabled = false;
+  input.focus();
+  if (input.select && input.type !== "range") input.select();
+}
+
+// The gap panel only lays out the lines the engine wrote (gaps.panel_line); it never
+// shows a raw null, so the words "not provided" cannot appear here.
 function drawGaps() {
   const box = $("#gaps");
   box.replaceChildren();
   const gaps = state.coverage && state.coverage.gaps;
-  if (!gaps) return box.appendChild(el("p", { class: "note" }, "No gap result."));
+  if (!gaps) return box.appendChild(el("p", { class: "note" }, "Run a scenario to see coverage per axis."));
   Object.entries(gaps.axes || {}).forEach(([axis, g]) => {
+    if (g.state === "NOT_EVALUATED") {
+      const line = el("button", { type: "button", class: "gap-unset", "data-axis": axis }, g.summary);
+      line.addEventListener("click", () => openAxisInput(axis));
+      box.appendChild(line);
+      return;
+    }
     const row = el("div", { class: "gap-axis" });
-    row.append(el("span", {}, QUANTITIES[axis] || axis), el("span", { class: `gap-class ${g.class}` }, g.class));
-    row.append(el("span", { class: "note" }, "tested"), el("span", { class: "mono" }, `${show(g.tested_min)} to ${show(g.tested_max)}`));
-    row.append(el("span", { class: "note" }, "distance"), el("span", { class: "mono" }, `${show(g.distance)} (nearest ${show(g.nearest_value)}, ${g.runs_within} runs within)`));
+    row.append(el("span", {}, AXIS_LABEL[axis] || axis), el("span", { class: `gap-class ${g.class}` }, g.class));
+    row.append(el("span", {}), el("span", { class: "gap-line" }, g.summary));
     box.appendChild(row);
   });
-  if (gaps.combination) {
-    box.appendChild(el("p", {}, `Combination: ${gaps.combination.class} (${gaps.combination.runs_matching} runs match all axes)`));
-  }
+  if (gaps.combination) box.appendChild(el("p", { class: "gap-combo" }, gaps.combination.summary));
 }
 
 function drawRanked() {
