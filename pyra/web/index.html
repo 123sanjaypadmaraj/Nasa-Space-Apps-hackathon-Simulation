@@ -34,7 +34,6 @@
     <div class="subnav" role="tablist" aria-label="Explore views">
       <a class="subtab" href="#/explore" data-sub="coverage">Coverage</a>
       <a class="subtab" href="#/explore/research" data-sub="research">Research gaps</a>
-      <a class="subtab" href="#/explore/compare" data-sub="compare">Compare</a>
     </div>
 
     <div id="sub-coverage" class="sub explorer">
@@ -76,7 +75,15 @@
 
       <aside class="panel">
         <h2>Ranked investigations <span class="badge der">DERIVED</span></h2>
+        <div class="compare-bar row">
+          <button type="button" id="compare-btn" aria-controls="compare-panel" aria-expanded="false" disabled>Compare (0)</button>
+          <span class="note" id="compare-hint">Tick 2 or 3 investigations to compare.</span>
+        </div>
         <ol id="ranked" class="ranked"></ol>
+        <details id="more-investigations">
+          <summary>Other investigations</summary>
+          <div id="compare-picks" class="picks"></div>
+        </details>
       </aside>
     </div>
 
@@ -98,14 +105,6 @@
         <button type="submit">Run backtest</button>
       </form>
       <div id="backtest-out"></div>
-    </div>
-
-    <div id="sub-compare" class="sub" hidden>
-      <h2>Compare investigations</h2>
-      <p class="note">Pick two or three. PYRA checks hardware, scale, fuel phase and method before numbers sit side by side.</p>
-      <div id="compare-picks" class="picks"></div>
-      <button id="compare-btn" type="button">Compare</button>
-      <div id="compare-out"></div>
     </div>
 
     <div id="sub-report" class="sub" hidden>
@@ -162,6 +161,12 @@
     <div id="builder-out"></div>
   </section>
 </main>
+
+<!-- ================= Compare side panel ================= -->
+<aside id="compare-panel" class="drawer wide" aria-label="Compare investigations" hidden>
+  <div class="row drawer-head"><h2>Compare <span class="badge der">DERIVED</span> verdict, <span class="badge mea">MEASURED</span> cells</h2><button type="button" class="drawer-close" data-close="compare-panel" aria-label="Close">&times;</button></div>
+  <div id="compare-out"></div>
+</aside>
 
 <!-- ================= Assistant side panel ================= -->
 <aside id="ask-panel" class="drawer" aria-label="Ask the evidence" hidden>

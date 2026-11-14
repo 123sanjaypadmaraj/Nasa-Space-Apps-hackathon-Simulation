@@ -169,3 +169,18 @@ textarea { font: inherit; color: var(--text); background: #0e1a30; border: 1px s
 
 .badge.int { color: #a8c7ff; border-color: #a8c7ff; }
 .badge.pro { color: #ffd9a0; border-color: #ffd9a0; }
+
+/* ---------- compare drawer ---------- */
+.drawer.wide { width: min(860px, 100vw); }
+.compare-bar { margin-bottom: 8px; }
+.ranked-head { cursor: pointer; }
+.ranked-head input, .picks input { margin-right: 4px; accent-color: var(--amber); }
+.verdict { border: 2px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 10px 0 14px; }
+.verdict.no { border-color: var(--amber); }
+.verdict.ok { border-color: #7ee2a8; }
+.verdict-title { font: 700 16px var(--mono); letter-spacing: 1px; margin: 0 0 6px; }
+.verdict.no .verdict-title { color: var(--amber); }
+.verdict.ok .verdict-title { color: #7ee2a8; }
+.verdict ul { margin: 0; padding-left: 18px; }
+.verdict li { margin-bottom: 4px; }
+#more-investigations { margin-top: 10px; }

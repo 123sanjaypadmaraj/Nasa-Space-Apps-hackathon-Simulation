@@ -12,7 +12,9 @@ const SHAPES = { bench: "circle", "spacecraft-scale": "square", unknown: "triang
 const META_KEYS = ["source", "compartment", "t", "scenario", "label"];
 const SVG = "http://www.w3.org/2000/svg";
 
-const state = { investigations: [], runs: [], coverage: null, telemetry: [], step: 0, timer: null };
+const state = { investigations: [], runs: [], coverage: null, telemetry: [], step: 0, timer: null,
+  selected: new Set() };
+const MAX_COMPARE = 3;
 const $ = (sel) => document.querySelector(sel);
 
 async function api(path, body) {
@@ -71,10 +73,10 @@ function table(rows) {
 /* ---------- views ---------- */
 
 // Routes are "#/<tab>/<sub>". Three tabs: explore, ops, builder.
-const TABS = { explore: ["coverage", "research", "compare", "report"], ops: ["crew", "controller"], builder: [] };
+const TABS = { explore: ["coverage", "research", "report"], ops: ["crew", "controller"], builder: [] };
 // Old one-word views (from the six-tab layout) redirect to where they live now.
 const LEGACY = {
-  explorer: "explore", researchers: "explore/research", compare: "explore/compare", report: "explore/report",
+  explorer: "explore", researchers: "explore/research", compare: "explore", report: "explore/report",
   astronaut: "ops/crew", mission: "ops/controller", builders: "builder",
 };
 
@@ -311,12 +313,41 @@ function drawGaps() {
   if (gaps.combination) box.appendChild(el("p", { class: "gap-combo" }, gaps.combination.summary));
 }
 
+function pickBox(acronym) {
+  const box = el("input", { type: "checkbox", value: acronym, class: "pick", "aria-label": `Select ${acronym} to compare` });
+  box.checked = state.selected.has(acronym);
+  box.addEventListener("change", () => {
+    if (box.checked) state.selected.add(acronym); else state.selected.delete(acronym);
+    syncPicks();
+  });
+  return box;
+}
+
+// Keep every checkbox for the same investigation in step, and cap the selection at MAX_COMPARE.
+function syncPicks() {
+  const full = state.selected.size >= MAX_COMPARE;
+  document.querySelectorAll("input.pick").forEach((box) => {
+    box.checked = state.selected.has(box.value);
+    box.disabled = full && !box.checked;
+  });
+  const n = state.selected.size;
+  const button = $("#compare-btn");
+  button.textContent = `Compare (${n})`;
+  button.disabled = n < 2 || n > MAX_COMPARE;
+  $("#compare-hint").textContent = n < 2 ? "Tick 2 or 3 investigations to compare."
+    : `${[...state.selected].join(", ")}`;
+}
+
 function drawRanked() {
   const list = $("#ranked");
   list.replaceChildren();
-  ((state.coverage && state.coverage.ranked) || []).forEach((inv) => {
+  const ranked = (state.coverage && state.coverage.ranked) || [];
+  ranked.forEach((inv) => {
     const li = el("li");
-    li.append(el("strong", {}, `${inv.acronym} `), el("span", { class: "total" }, show(inv.total)), el("span", { class: "note" }, ` ${inv.evidence_class}`));
+    const head = el("label", { class: "ranked-head" });
+    head.append(pickBox(inv.acronym), el("strong", {}, ` ${inv.acronym} `), el("span", { class: "total" }, show(inv.total)),
+      el("span", { class: "note" }, ` ${inv.evidence_class || ""}`));
+    li.appendChild(head);
     const bars = el("div", { class: "bars" });
     Object.entries(inv.scores || {}).forEach(([name, score]) => {
       const bar = el("div", { class: "bar" });
@@ -329,6 +360,7 @@ function drawRanked() {
     if (inv.unmatched && inv.unmatched.length) li.appendChild(el("div", { class: "note" }, `Not matched: ${inv.unmatched.join(", ")}`));
     list.appendChild(li);
   });
+  drawPicks(new Set(ranked.map((inv) => inv.acronym)));
 }
 
 async function openReport() {
@@ -340,38 +372,68 @@ async function openReport() {
   } catch (err) { showError(err); }
 }
 
-/* ---------- Compare ---------- */
+/* ---------- Compare (side panel) ---------- */
 
-function drawPicks() {
+// Investigations that are not in the ranked list can still be picked from "Other investigations".
+function drawPicks(shown = new Set()) {
   const box = $("#compare-picks");
   box.replaceChildren();
-  state.investigations.forEach((inv) => {
+  state.investigations.filter((inv) => !shown.has(inv.acronym)).forEach((inv) => {
     const label = el("label");
-    const box2 = el("input", { type: "checkbox", value: inv.acronym });
-    label.append(box2, ` ${inv.acronym}`);
+    label.append(pickBox(inv.acronym), ` ${inv.acronym}`);
     box.appendChild(label);
   });
+  if (!box.children.length) box.appendChild(el("p", { class: "note" }, "All investigations are in the ranked list."));
+  syncPicks();
+}
+
+// What each verdict reason is about. The wording comes from pyra/compare.py; we only label it.
+const REASON_TOPICS = [
+  [/hardware/i, "Hardware"], [/scale/i, "Scale"], [/fuel|phase/i, "Fuel phase"],
+  [/sensor|measure/i, "Measurement definition"],
+];
+
+function reasonItem(reason) {
+  const text = reason.replace(/^NOT DIRECTLY COMPARABLE:\s*/, "");
+  const topic = (REASON_TOPICS.find(([pattern]) => pattern.test(text)) || [null, "Other"])[1];
+  const li = el("li");
+  li.append(el("strong", {}, `${topic}: `), text);
+  return li;
+}
+
+function verdictBlock(verdict) {
+  const block = el("div", { class: verdict.comparable ? "verdict ok" : "verdict no" });
+  if (verdict.comparable) {
+    block.appendChild(el("p", { class: "verdict-title" }, "COMPARABLE WITH CARE"));
+    block.appendChild(el("p", { class: "note" }, "Hardware, scale, fuel phase and sensors match. [DERIVED]"));
+    return block;
+  }
+  block.appendChild(el("p", { class: "verdict-title" }, "NOT DIRECTLY COMPARABLE"));
+  const reasons = el("ul");
+  (verdict.reasons || []).forEach((r) => reasons.appendChild(reasonItem(r)));
+  block.appendChild(reasons);
+  return block;
 }
 
 async function runCompare() {
-  const acronyms = [...document.querySelectorAll("#compare-picks input:checked")].map((i) => i.value);
+  const acronyms = [...state.selected];
   const out = $("#compare-out");
-  out.replaceChildren();
+  out.replaceChildren(el("p", { class: "note" }, `Comparing ${acronyms.join(", ")}...`));
+  toggleDrawer("compare-panel", true);
   try {
     const found = await api("/api/compare", { acronyms });
     showError(null);
-    const verdict = found.verdict || {};
-    out.appendChild(el("p", { class: verdict.comparable ? "" : "banner alert" },
-      verdict.comparable ? "These can be compared directly." : `Not directly comparable: ${(verdict.reasons || []).join("; ")}`));
+    out.replaceChildren(verdictBlock(found.verdict || {}));
+    const names = found.investigations || acronyms;
     const tbl = el("table");
     const head = el("tr");
     head.appendChild(el("th", {}, "field"));
-    acronyms.forEach((a) => head.appendChild(el("th", {}, a)));
+    names.forEach((a) => head.appendChild(el("th", {}, a)));
     tbl.appendChild(head);
     (found.rows || []).forEach((row) => {
       const tr = el("tr", { class: row.same ? "" : "differs" });
       tr.appendChild(el("td", {}, row.field));
-      const values = Array.isArray(row.values) ? row.values : acronyms.map((a) => row.values[a]);
+      const values = Array.isArray(row.values) ? row.values : names.map((a) => row.values[a]);
       values.forEach((v) => tr.appendChild(el("td", {}, show(v))));
       tbl.appendChild(tr);
     });
@@ -379,12 +441,14 @@ async function runCompare() {
     wrap.appendChild(tbl);
     out.appendChild(wrap);
     [["Can conclude", found.can_conclude], ["Cannot conclude", found.cannot_conclude]].forEach(([title, items]) => {
-      out.appendChild(el("h3", {}, title));
+      out.appendChild(el("h3", {}, `${title} [DERIVED]`));
       const ul = el("ul");
       [].concat(items || []).forEach((t) => ul.appendChild(el("li", {}, show(t))));
       out.appendChild(ul);
     });
-  } catch (err) { showError(err); }
+  } catch (err) {
+    out.replaceChildren(el("p", { class: "error" }, err.message));
+  }
 }
 
 /* ---------- Astronaut and Mission control (SIMULATED) ---------- */

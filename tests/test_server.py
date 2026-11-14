@@ -63,6 +63,8 @@ class ServerTest(unittest.TestCase):
             self.assertIn(f'data-tab="{tab}"', page)
         self.assertEqual(page.count('data-tab="'), 3)
         self.assertIn('id="ask-panel"', page)
+        self.assertIn('id="compare-panel"', page)       # compare is a side panel now
+        self.assertNotIn("explore/compare", page)       # not a tab or sub-view
         for label in ("MEASURED", "DERIVED", "HYPOTHETICAL", "INTERPRETATION", "SIMULATED",
                       "PLACEHOLDER", "ILLUSTRATIVE", "PROPOSAL"):
             self.assertIn(label, page)
@@ -88,6 +90,13 @@ class ServerTest(unittest.TestCase):
             "cutoff_year": 2015, "years": {},
             "checks": [{"name": "c", "scenario": {"o2_percent": 34}, "should_flag": True}]})
         self.assertEqual(found["hits"] + found["misses"], 1)
+
+    def test_compare_verdict_still_comes_from_the_engine(self):
+        _, body = self.get("/api/investigations")
+        acronyms = [inv["acronym"] for inv in json.loads(body)][:2]
+        found = self.post("/api/compare", {"acronyms": acronyms})
+        self.assertIn("comparable", found["verdict"])
+        self.assertEqual(found["investigations"], acronyms)
 
     def test_files_outside_the_web_folder_are_refused(self):
         with self.assertRaises(HTTPError) as caught:
