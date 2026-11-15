@@ -12,7 +12,7 @@ const SHAPES = { bench: "circle", "spacecraft-scale": "square", unknown: "triang
 const SVG = "http://www.w3.org/2000/svg";
 
 const state = { investigations: [], runs: [], coverage: null, telemetry: [], step: 0, timer: null,
-  selected: new Set() };
+  selected: new Set(), history: {} };
 const MAX_COMPARE = 3;
 const $ = (sel) => document.querySelector(sel);
 
@@ -72,7 +72,7 @@ function table(rows) {
 /* ---------- views ---------- */
 
 // Routes are "#/<tab>/<sub>". Three tabs: explore, ops, builder.
-const TABS = { explore: ["coverage", "research", "report"], ops: ["crew", "controller"], builder: [] };
+const TABS = { explore: ["coverage", "research", "report"], ops: ["crew", "controller", "twin"], builder: [] };
 // Old one-word views (from the six-tab layout) redirect to where they live now.
 const LEGACY = {
   explorer: "explore", researchers: "explore/research", compare: "explore", report: "explore/report",
@@ -106,6 +106,7 @@ function route() {
 function toggleDrawer(id, open) {
   const drawer = document.getElementById(id);
   drawer.hidden = open === undefined ? !drawer.hidden : !open;
+  $("#scrim").hidden = !document.querySelector(".drawer:not([hidden])");
   const toggle = document.querySelector(`[aria-controls=${id}]`);
   if (toggle) toggle.setAttribute("aria-expanded", String(!drawer.hidden));
   if (!drawer.hidden) { const first = drawer.querySelector("input, button:not(.drawer-close)"); if (first) first.focus(); }
@@ -144,12 +145,14 @@ function scenarioValues() {
 function drawMap() {
   const svg = $("#map");
   const width = svg.clientWidth || 700, height = svg.clientHeight || 440;
-  const m = { left: 56, right: 16, top: 14, bottom: 40 };
+  const m = { left: 62, right: 22, top: 20, bottom: 46 };
   const xKey = $("#x-axis").value, yKey = $("#y-axis").value;
   const runs = state.coverage ? state.coverage.runs : state.runs;
   const scen = scenarioValues();
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.replaceChildren();
+  svg.appendChild(svgEl("rect", { class: "plot-bg", x: m.left, y: m.top, width: Math.max(0, width - m.left - m.right),
+    height: Math.max(0, height - m.top - m.bottom), rx: 6 }));
 
   const xs = runs.map((r) => r.values[xKey]).concat(scen ? [scen[xKey]] : []);
   const ys = runs.map((r) => r.values[yKey]).concat(scen ? [scen[yKey]] : []);
@@ -159,19 +162,20 @@ function drawMap() {
 
   ticks(xDom).forEach((v) => {
     svg.appendChild(svgEl("line", { class: "grid", x1: sx(v), x2: sx(v), y1: m.top, y2: height - m.bottom }));
-    const label = svgEl("text", { x: sx(v), y: height - m.bottom + 14, "text-anchor": "middle" });
+    const label = svgEl("text", { x: sx(v), y: height - m.bottom + 18, "text-anchor": "middle" });
     label.textContent = show(v);
     svg.appendChild(label);
   });
   ticks(yDom).forEach((v) => {
     svg.appendChild(svgEl("line", { class: "grid", x1: m.left, x2: width - m.right, y1: sy(v), y2: sy(v) }));
-    const label = svgEl("text", { x: m.left - 6, y: sy(v) + 4, "text-anchor": "end" });
+    const label = svgEl("text", { x: m.left - 10, y: sy(v) + 4, "text-anchor": "end" });
     label.textContent = show(v);
     svg.appendChild(label);
   });
-  const xTitle = svgEl("text", { x: width / 2, y: height - 6, "text-anchor": "middle" });
+  const xTitle = svgEl("text", { class: "axis-title", x: m.left + (width - m.left - m.right) / 2, y: height - 8, "text-anchor": "middle" });
   xTitle.textContent = QUANTITIES[xKey];
-  const yTitle = svgEl("text", { x: 14, y: height / 2, transform: `rotate(-90 14 ${height / 2})`, "text-anchor": "middle" });
+  const yMid = m.top + (height - m.top - m.bottom) / 2;
+  const yTitle = svgEl("text", { class: "axis-title", x: 14, y: yMid, transform: `rotate(-90 14 ${yMid})`, "text-anchor": "middle" });
   yTitle.textContent = QUANTITIES[yKey];
   svg.append(xTitle, yTitle);
 
@@ -199,16 +203,15 @@ function drawMap() {
 
   if (hasScenario) {
     const x = sx(scen[xKey]), y = sy(scen[yKey]);
-    svg.appendChild(svgEl("circle", { cx: x, cy: y, r: 11, fill: "none", stroke: "#ffb000", "stroke-width": 2 }));
-    svg.appendChild(svgEl("path", { d: `M${x - 7} ${y}H${x + 7}M${x} ${y - 7}V${y + 7}`, stroke: "#ffb000", "stroke-width": 2 }));
-    const tag = svgEl("text", { x: x + 14, y: y - 10 });
-    tag.textContent = "HYPOTHETICAL";
-    tag.setAttribute("style", "fill:#ffb000");
+    svg.appendChild(svgEl("circle", { class: "scenario", cx: x, cy: y, r: 7 }));
+    const right = x < width - 160;
+    const tag = svgEl("text", { class: "scenario-tag", x: right ? x + 12 : x - 12, y: y - 10, "text-anchor": right ? "start" : "end" });
+    tag.textContent = "your scenario";
     svg.appendChild(tag);
   }
 
   const hidden = runs.length - placed.length;
-  const note = svgEl("text", { x: width - m.right, y: m.top + 10, "text-anchor": "end" });
+  const note = svgEl("text", { class: "map-note", x: width - m.right - 10, y: m.top + 18, "text-anchor": "end" });
   note.textContent = hidden ? `${hidden} run(s) not shown: missing ${QUANTITIES[xKey]} or ${QUANTITIES[yKey]}` : "";
   svg.appendChild(note);
   drawLegend();
@@ -246,7 +249,7 @@ function drawLegend() {
     legend.appendChild(item);
   };
   state.investigations.forEach((inv) => swatch("circle", colorOf(inv.acronym), inv.acronym));
-  Object.entries(SHAPES).forEach(([scale, shape]) => swatch(shape, "#9fb0cc", `scale: ${scale}`));
+  Object.entries(SHAPES).forEach(([scale, shape]) => swatch(shape, "#8d8f96", `scale: ${scale}`));
   legend.appendChild(el("span", {}, "Points are MEASURED values; gravity placed from words like \"microgravity\" is DERIVED."));
 }
 
@@ -291,6 +294,17 @@ function openAxisInput(axis) {
   if (input.select && input.type !== "range") input.select();
 }
 
+// Gap classes from best evidence to none (pyra/gaps.py); the ladder fills one segment per rung of strength.
+const LADDER = ["DIRECTLY_TESTED", "BOUNDED", "ONE_SIDED", "INSUFFICIENT", "NOT_COMPARABLE", "NO_INDEXED_DATA"];
+
+function ladder(cls) {
+  const rung = LADDER.indexOf(cls);
+  const strength = rung < 0 ? 0 : LADDER.length - rung;
+  const box = el("span", { class: "ladder", title: cls, "aria-hidden": "true" });
+  LADDER.forEach((_, i) => box.appendChild(el("i", { class: i < strength ? "on" : "" })));
+  return box;
+}
+
 // The gap panel only lays out the lines the engine wrote (gaps.panel_line); it never
 // shows a raw null, so the words "not provided" cannot appear here.
 function drawGaps() {
@@ -300,15 +314,19 @@ function drawGaps() {
   if (!gaps) return box.appendChild(el("p", { class: "note" }, "Run a scenario to see coverage per axis."));
   Object.entries(gaps.axes || {}).forEach(([axis, g]) => {
     if (g.state === "NOT_EVALUATED") {
-      const line = el("button", { type: "button", class: "gap-unset", "data-axis": axis }, g.summary);
+      const line = el("button", { type: "button", class: "gap-unset", "data-axis": axis });
+      line.append(el("b", {}, `+ ${AXIS_LABEL[axis] || axis}`), g.summary);
       line.addEventListener("click", () => openAxisInput(axis));
       box.appendChild(line);
       return;
     }
-    const row = el("div", { class: "gap-axis" });
-    row.append(el("span", {}, AXIS_LABEL[axis] || axis), el("span", { class: `gap-class ${g.class}` }, g.class));
-    row.append(el("span", {}), el("span", { class: "gap-line" }, g.summary));
-    box.appendChild(row);
+    const rung = LADDER.indexOf(g.class);
+    const card = el("div", { class: `gap-card ${g.class}${rung >= 2 ? " weak" : ""}` });
+    const top = el("div", { class: "gap-top" });
+    top.append(el("span", { class: "gap-axis-name" }, AXIS_LABEL[axis] || axis), ladder(g.class));
+    card.append(top, el("span", { class: `gap-class ${g.class}` }, String(g.class).replace(/_/g, " ")),
+      el("span", { class: "gap-line" }, g.summary));
+    box.appendChild(card);
   });
   if (gaps.combination) box.appendChild(el("p", { class: "gap-combo" }, gaps.combination.summary));
 }
@@ -345,8 +363,9 @@ function drawRanked() {
   ranked.forEach((inv) => {
     const li = el("li");
     const head = el("label", { class: "ranked-head" });
-    head.append(pickBox(inv.acronym), el("strong", {}, ` ${inv.acronym} `), el("span", { class: "total" }, show(inv.total)),
-      el("span", { class: "note" }, ` ${inv.evidence_class || ""}`));
+    head.append(pickBox(inv.acronym), el("strong", {}, inv.acronym));
+    if (inv.evidence_class) head.appendChild(el("span", { class: "ev" }, inv.evidence_class));
+    head.appendChild(el("span", { class: "total", title: "Closeness score [DERIVED]" }, show(inv.total)));
     li.appendChild(head);
     const bars = el("div", { class: "bars" });
     Object.entries(inv.scores || {}).forEach(([name, score]) => {
@@ -360,6 +379,7 @@ function drawRanked() {
     if (inv.unmatched && inv.unmatched.length) li.appendChild(el("div", { class: "note" }, `Not matched: ${inv.unmatched.join(", ")}`));
     list.appendChild(li);
   });
+  if (!ranked.length) list.appendChild(el("li", { class: "note ranked-empty" }, "Run a scenario to rank the indexed investigations."));
   drawPicks(new Set(ranked.map((inv) => inv.acronym)));
 }
 
@@ -404,11 +424,11 @@ function reasonItem(reason) {
 function verdictBlock(verdict) {
   const block = el("div", { class: verdict.comparable ? "verdict ok" : "verdict no" });
   if (verdict.comparable) {
-    block.appendChild(el("p", { class: "verdict-title" }, "COMPARABLE WITH CARE"));
+    block.appendChild(el("p", { class: "verdict-title" }, "Comparable with care"));
     block.appendChild(el("p", { class: "note" }, "Hardware, scale, fuel phase and sensors match. [DERIVED]"));
     return block;
   }
-  block.appendChild(el("p", { class: "verdict-title" }, "NOT DIRECTLY COMPARABLE"));
+  block.appendChild(el("p", { class: "verdict-title" }, "Not directly comparable"));
   const reasons = el("ul");
   (verdict.reasons || []).forEach((r) => reasons.appendChild(reasonItem(r)));
   block.appendChild(reasons);
@@ -453,7 +473,7 @@ async function runCompare() {
 
 /* ---------- Ops: Crew and Controller over one SIMULATED stream ---------- */
 
-const OPS = { steps: 180, seed: 1, compartments: ["habitat", "lab", "node"] };
+const OPS = { steps: 180, seed: 1, compartments: ["habitat", "lab", "node"], speed: 1 };
 
 function stopTelemetry() {
   clearInterval(state.timer);
@@ -463,9 +483,26 @@ function stopTelemetry() {
 function startTelemetry(restart = false) {
   if (state.timer && !restart) return;
   stopTelemetry();
-  if (restart) state.step = 0;
+  if (restart) { state.step = 0; state.history = {}; state.lastT = null; }
+  syncPlayback();
+  if (state.paused) { tick(false); return; }
   tick();
-  state.timer = setInterval(tick, 1000);
+  state.timer = setInterval(tick, 1000 / OPS.speed);
+}
+
+function syncPlayback() {
+  const play = $("#ops-play");
+  play.textContent = state.paused ? "Play" : "Pause";
+  play.setAttribute("aria-label", state.paused ? "Play" : "Pause");
+  play.setAttribute("aria-pressed", String(!!state.paused));
+  $("#ops-scrub").max = OPS.steps - 1;
+  $("#ops-scrub").value = Math.min(state.step, OPS.steps - 1);
+}
+
+function togglePlay() {
+  if (state.paused && state.step >= OPS.steps) { state.paused = false; return startTelemetry(true); }
+  state.paused = !state.paused;
+  if (state.paused) { stopTelemetry(); syncPlayback(); } else startTelemetry(); // resumes at the current step
 }
 
 function opsBody() {
@@ -477,8 +514,10 @@ function opsBody() {
   };
 }
 
-async function tick() {
-  if (state.opsBusy) return;
+async function tick(advance = true) {
+  // A redraw asked for mid-request (scrub, material or gravity change) runs once the request ends,
+  // so it is never lost. Timer ticks are simply skipped; the next interval brings another.
+  if (state.opsBusy) { if (!advance) state.pendingTick = true; return; }
   state.opsBusy = true;
   try {
     const view = await api("/api/ops", opsBody());
@@ -488,16 +527,21 @@ async function tick() {
       picker.value = view.scenario;
     }
     state.ops = view;
+    recordHistory();
     showError(null);
     drawCrew();
     drawController();
-    state.step += 1;
-    if (state.step >= OPS.steps) stopTelemetry();
+    window.pyraOps = view;
+    if (window.pyraTwin) window.pyraTwin.update(view);
+    $("#ops-scrub").value = Math.min(state.step, OPS.steps - 1);
+    if (advance) state.step += 1;
+    if (state.step >= OPS.steps) { stopTelemetry(); state.paused = true; syncPlayback(); }
   } catch (err) {
     showError(err);
     stopTelemetry();
   } finally {
     state.opsBusy = false;
+    if (state.pendingTick) { state.pendingTick = false; tick(false); }
   }
 }
 
@@ -512,9 +556,34 @@ function crewCompartment() {
   return state.ops.compartments[picker.value];
 }
 
+function crewName() { return $("#crew-compartment").value; }
+
+// Remember the recent SIMULATED values per channel so a tile can show its trend.
+function recordHistory() {
+  if (state.ops.t === state.lastT) return;
+  state.lastT = state.ops.t;
+  Object.entries(state.ops.compartments).forEach(([name, room]) => room.tiles.forEach((tile) => {
+    const key = `${name}:${tile.channel}`;
+    const series = state.history[key] || (state.history[key] = []);
+    if (typeof tile.value === "number") series.push(tile.value);
+    if (series.length > 60) series.shift();
+  }));
+}
+
+function sparkline(series) {
+  const svg = svgEl("svg", { class: "spark", viewBox: "0 0 100 40", preserveAspectRatio: "none", "aria-hidden": "true" });
+  if (series.length < 2) return svg;
+  let lo = Math.min(...series), hi = Math.max(...series);
+  if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
+  const pts = series.map((v, i) => [(i / (series.length - 1)) * 100, 36 - ((v - lo) / (hi - lo)) * 30]);
+  const line = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`).join("");
+  svg.append(svgEl("path", { class: "area", d: `${line}L100 40L0 40Z` }), svgEl("path", { class: "line", d: line }));
+  return svg;
+}
+
 function drawCrew() {
   if (!state.ops) return;
-  $("#ops-clock").textContent = `t = ${state.ops.t} s of ${OPS.steps} [SIMULATED]`;
+  $("#ops-clock").textContent = `t = ${state.ops.t} s of ${OPS.steps}`;
   const room = crewCompartment();
   if (!room) return;
   const banner = $("#banner");
@@ -526,8 +595,10 @@ function drawCrew() {
     const open = state.openTile === tile.channel;
     const button = el("button", { type: "button", class: `tile ${tile.status}`, "aria-expanded": String(open),
       "aria-controls": "tile-detail" });
-    button.append(el("span", {}, tile.title), el("b", {}, show(tile.value)), el("span", { class: "unit" }, tile.unit),
-      el("span", { class: `chip ${tile.status}` }, tile.status));
+    const value = el("span", { class: "value" });
+    value.append(el("b", {}, show(tile.value)), el("span", { class: "unit" }, tile.unit));
+    button.append(el("span", {}, tile.title), value, el("span", { class: `chip ${tile.status}` }, tile.status),
+      sparkline(state.history[`${crewName()}:${tile.channel}`] || []));
     button.addEventListener("click", () => {
       state.openTile = open ? null : tile.channel;
       drawCrew();
@@ -693,6 +764,7 @@ function drawPpo2() {
   const kpa = form.get("pressure_unit") === "psi" ? p * PSI_IN_KPA : p;
   const ok = filled && Number.isFinite(o2 * kpa) && o2 >= 0 && o2 <= 100 && p > 0;
   $("#b-ppo2").value = ok ? (o2 / 100 * kpa).toFixed(2) : "set a valid O2 and pressure";
+  $("#b-ppo2").classList.toggle("empty", !ok);
 }
 
 function applyPreset() {
@@ -910,8 +982,11 @@ async function start() {
     $(sel).addEventListener("change", drawMap);
   });
   $("#scenario").addEventListener("submit", (e) => { e.preventDefault(); runCoverage(); });
+  const fill = (r) => r.style.setProperty("--p", `${((r.value - r.min) / (r.max - r.min)) * 100}%`);
+  fill($("#scenario [name=gravity_g]"));
   $("#scenario [name=gravity_g]").addEventListener("input", (e) => {
-    $("#g-out").value = e.target.value;
+    fill(e.target);
+    $("#g-out").value = Number(e.target.value).toFixed(2);
     $("#scenario [name=gravity_set]").checked = true;
   });
   $("#report-btn").addEventListener("click", openReport);
@@ -923,6 +998,7 @@ async function start() {
   $("#b-preset").addEventListener("change", builderBoundary(async () => { applyPreset(); await runBuilder(); }));
   $("#ask").addEventListener("submit", runAsk);
   $("#ask-toggle").addEventListener("click", () => toggleDrawer("ask-panel"));
+  $("#scrim").addEventListener("click", () => document.querySelectorAll(".drawer:not([hidden])").forEach((d) => toggleDrawer(d.id, false)));
   document.querySelectorAll(".drawer-close").forEach((b) => b.addEventListener("click", () => toggleDrawer(b.dataset.close, false)));
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") document.querySelectorAll(".drawer:not([hidden])").forEach((d) => toggleDrawer(d.id, false));
@@ -932,8 +1008,19 @@ async function start() {
   $("#tele-scenario").addEventListener("change", () => startTelemetry(true));
   $("#crew-compartment").addEventListener("change", drawCrew);
   ["#material-class", "#ops-gravity"].forEach((sel) => $(sel).addEventListener("change", () => {
-    if (!state.timer) tick();
+    tick(false);
   }));
+  $("#ops-play").addEventListener("click", togglePlay);
+  $("#ops-restart").addEventListener("click", () => startTelemetry(true));
+  $("#ops-speed").addEventListener("change", (e) => {
+    OPS.speed = Number(e.target.value) || 1;
+    if (state.timer) { stopTelemetry(); state.timer = setInterval(tick, 1000 / OPS.speed); }
+  });
+  $("#ops-scrub").addEventListener("input", (e) => {
+    state.step = Number(e.target.value);
+    state.history = {}; state.lastT = null;
+    tick(false);
+  });
   $("#large-text").addEventListener("click", (e) => {
     const on = document.body.classList.toggle("large");
     e.target.setAttribute("aria-pressed", on);

@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PYRA Evidence Explorer</title>
 <link rel="stylesheet" href="style.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"}}</script>
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">PYRA <span class="sub">fire-safety evidence explorer</span></div>
+  <a class="brand" href="#/explore">PYRA</a>
   <nav class="roles" aria-label="Main">
     <a class="tab" href="#/explore" data-tab="explore">Explore</a>
     <a class="tab" href="#/ops" data-tab="ops">Ops</a>
@@ -20,192 +21,241 @@
       <div class="menu-items">
         <a href="/api/export?format=csv" download="pyra_export.csv">Evidence table (CSV)</a>
         <a href="/api/export?format=json" download="pyra_export.json">Evidence table (JSON)</a>
-        <button type="button" id="report-menu">Scenario report (print to PDF)</button>
+        <button type="button" id="report-menu">Scenario report (PDF)</button>
       </div>
     </details>
-    <button type="button" id="ask-toggle" aria-expanded="false" aria-controls="ask-panel">Ask the evidence</button>
+    <button type="button" id="ask-toggle" class="btn primary" aria-expanded="false" aria-controls="ask-panel">
+      Search papers
+    </button>
   </div>
 </header>
+
 <div id="error" class="error" role="alert" hidden></div>
 
 <main>
   <!-- ================= Explore ================= -->
   <section id="view-explore" class="view">
-    <div class="subnav" role="tablist" aria-label="Explore views">
-      <a class="subtab" href="#/explore" data-sub="coverage">Coverage</a>
-      <a class="subtab" href="#/explore/research" data-sub="research">Research gaps</a>
+    <div class="view-head">
+      <h1>Evidence coverage</h1>
+      <div class="subnav" role="tablist" aria-label="Explore views">
+        <a class="subtab" href="#/explore" data-sub="coverage">Coverage</a>
+        <a class="subtab" href="#/explore/research" data-sub="research">Research gaps</a>
+      </div>
     </div>
 
     <div id="sub-coverage" class="sub explorer">
-      <form id="scenario" class="rail" aria-label="Scenario">
-        <h2>Scenario <span class="badge hyp">HYPOTHETICAL</span></h2>
-        <label>O2 (%) <input name="o2_percent" type="number" step="0.1" min="0" max="100" value="30"></label>
-        <label>Pressure
-          <span class="row"><input name="pressure" type="number" step="0.1" min="0" value="70">
+      <form id="scenario" class="card rail" aria-label="Scenario">
+        <div class="card-head"><h2>Scenario</h2><span class="badge hyp">HYPOTHETICAL</span></div>
+        <label class="fld"><span class="lbl">Oxygen <em>%</em></span>
+          <input name="o2_percent" type="number" step="0.1" min="0" max="100" value="30"></label>
+        <label class="fld"><span class="lbl">Pressure</span>
+          <span class="joined"><input name="pressure" type="number" step="0.1" min="0" value="70">
           <select name="pressure_unit" aria-label="Pressure unit"><option>kPa</option><option>psi</option></select></span>
         </label>
-        <label>Flow speed (cm/s) <input name="flow_speed" type="number" step="0.1" min="0" value="10"></label>
-        <label><input name="gravity_set" type="checkbox" value="1" checked> Gravity: <output id="g-out" class="mono">0.16</output> g
-          <input name="gravity_g" type="range" min="0" max="1" step="0.01" value="0.16" list="g-marks">
+        <label class="fld"><span class="lbl">Flow speed <em>cm/s</em></span>
+          <input name="flow_speed" type="number" step="0.1" min="0" value="10"></label>
+        <div class="fld gravity">
+          <label class="g-head"><input name="gravity_set" type="checkbox" value="1" checked><span class="lbl">Gravity</span>
+            <output id="g-out" class="g-val">0.16</output><span class="g-unit">g</span></label>
+          <input name="gravity_g" type="range" min="0" max="1" step="0.01" value="0.16" list="g-marks" aria-label="Gravity in g">
           <datalist id="g-marks"><option value="0" label="0"><option value="0.16" label="Moon"><option value="0.38" label="Mars"><option value="1" label="1 g"></datalist>
-          <span class="ticks" aria-hidden="true"><i style="left:0">0</i><i style="left:16%">Moon 0.16</i><i style="left:38%">Mars 0.38</i><i style="left:100%">1</i></span>
-        </label>
-        <label>Pillar
+          <span class="ticks" aria-hidden="true"><i style="left:0">0</i><i style="left:16%">Moon</i><i style="left:38%">Mars</i><i style="left:100%">Earth</i></span>
+        </div>
+        <label class="fld"><span class="lbl">Pillar</span>
           <select name="pillar"><option value="">any (not set)</option><option>prevention</option><option>detection</option><option>suppression</option><option>supporting</option></select>
         </label>
-        <label>Material (optional) <input name="material" type="text"></label>
-        <div class="row"><button type="submit">Check coverage</button><button type="button" id="report-btn">Report</button></div>
-        <p class="note">Scenario values are typed by you, so they are HYPOTHETICAL. A 0.16 g or 0.38 g scenario is only bounded by microgravity and 1 g runs, never directly measured.</p>
+        <label class="fld"><span class="lbl">Material <em>optional</em></span><input name="material" type="text" placeholder="e.g. PMMA"></label>
+        <div class="btn-row"><button type="submit" class="btn primary block">Check coverage</button><button type="button" id="report-btn" class="btn ghost">Report</button></div>
+        <p class="note">You typed these values, so they are HYPOTHETICAL. A 0.16 g or 0.38 g scenario is only bounded by microgravity and 1 g runs. It is never measured directly.</p>
       </form>
 
       <div class="center">
-        <h2>Coverage Map <span class="badge mea">MEASURED</span> points</h2>
-        <div class="row axis-pick">
-          <label>X <select id="x-axis"></select></label>
-          <label>Y <select id="y-axis"></select></label>
+        <div class="card map-card">
+          <div class="card-head">
+            <h2>Coverage map</h2><span class="badge mea">MEASURED</span>
+            <div class="axis-pick">
+              <label><span>X</span><select id="x-axis"></select></label>
+              <label><span>Y</span><select id="y-axis"></select></label>
+            </div>
+          </div>
+          <figure class="map">
+            <svg id="map" role="img" aria-label="Coverage map of test runs"></svg>
+            <div id="hover" class="hover" hidden></div>
+          </figure>
+          <div id="legend" class="legend"></div>
         </div>
-        <figure class="map">
-          <svg id="map" role="img" aria-label="Coverage map of test runs"></svg>
-          <div id="hover" class="hover" hidden></div>
-        </figure>
-        <div id="legend" class="legend"></div>
-        <h2>Coverage by axis <span class="badge der">DERIVED</span></h2>
-        <div id="gaps"><p class="note">Run a scenario to see coverage per axis.</p></div>
+        <div class="card">
+          <div class="card-head"><h2>Coverage by axis</h2><span class="badge der">DERIVED</span>
+            <span class="ladder-key" aria-hidden="true"><i class="lk DIRECTLY_TESTED"></i><i class="lk BOUNDED"></i><i class="lk ONE_SIDED"></i><i class="lk INSUFFICIENT"></i><i class="lk NOT_COMPARABLE"></i><i class="lk NO_INDEXED_DATA"></i><span>tested → no data</span></span>
+          </div>
+          <div id="gaps"><p class="note">Run a scenario to see coverage per axis.</p></div>
+        </div>
       </div>
 
-      <aside class="panel">
-        <h2>Ranked investigations <span class="badge der">DERIVED</span></h2>
-        <div class="compare-bar row">
-          <button type="button" id="compare-btn" aria-controls="compare-panel" aria-expanded="false" disabled>Compare (0)</button>
+      <aside class="card panel">
+        <div class="card-head"><h2>Ranked investigations</h2><span class="badge der">DERIVED</span></div>
+        <div class="compare-bar">
+          <button type="button" id="compare-btn" class="btn" aria-controls="compare-panel" aria-expanded="false" disabled>Compare (0)</button>
           <span class="note" id="compare-hint">Tick 2 or 3 investigations to compare.</span>
         </div>
         <ol id="ranked" class="ranked"></ol>
-        <details id="more-investigations">
+        <details id="more-investigations" class="disclosure">
           <summary>Other investigations</summary>
           <div id="compare-picks" class="picks"></div>
         </details>
       </aside>
     </div>
 
-    <div id="sub-research" class="sub" hidden>
-      <h2>Research gaps <span class="badge der">DERIVED</span></h2>
-      <p class="note">Where the indexed evidence is thin, and which missing data would fill the biggest gaps. Uses the scenario from the Coverage view.</p>
-      <h3>Weakness per investigation</h3>
-      <div id="weakness"></div>
-      <h3>Opportunity ranking <span class="badge der">DERIVED</span></h3>
-      <p class="note">Score = gap size &times; mission relevance &times; data-cost factor. Weights are starting guesses in config/decisions.json.</p>
-      <button type="button" id="opportunities-btn">Rank opportunities for the current scenario</button>
-      <div id="opportunities"></div>
-      <h3>Backtest <span class="badge der">DERIVED</span></h3>
-      <p class="note">Re-runs the gap engine on only the papers published before a cutoff year, then checks whether the current scenario would have been flagged. The corpus has no publication years, so type them in.</p>
-      <form id="backtest" class="grid-form">
-        <label>Cutoff year <input name="cutoff_year" type="number" value="2015"></label>
-        <label>Years (one ACRONYM=YEAR per line) <textarea name="years" rows="3"></textarea></label>
-        <label><span><input name="should_flag" type="checkbox" checked> Scenario should be flagged</span></label>
-        <button type="submit">Run backtest</button>
-      </form>
-      <div id="backtest-out"></div>
+    <div id="sub-research" class="sub research" hidden>
+      <div class="card wide">
+        <div class="card-head"><h2>Weakness per investigation</h2><span class="badge der">DERIVED</span></div>
+        <p class="note">Where the indexed evidence is thin. Uses the scenario from the Coverage view.</p>
+        <div id="weakness"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Opportunity ranking</h2><span class="badge der">DERIVED</span></div>
+        <p class="note">Score = gap size &times; mission relevance &times; data-cost factor. The weights are starting guesses in config/decisions.json.</p>
+        <button type="button" id="opportunities-btn" class="btn primary">Rank opportunities for the current scenario</button>
+        <div id="opportunities"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Backtest</h2><span class="badge der">DERIVED</span></div>
+        <p class="note">Re-runs the gap engine on only the papers published before a cutoff year, then checks whether the current scenario would have been flagged. The corpus has no publication years, so you type them in.</p>
+        <form id="backtest" class="grid-form">
+          <label class="fld"><span class="lbl">Cutoff year</span><input name="cutoff_year" type="number" value="2015"></label>
+          <label class="fld"><span class="lbl">Years <em>ACRONYM=YEAR per line</em></span><textarea name="years" rows="3"></textarea></label>
+          <label class="check"><input name="should_flag" type="checkbox" checked> Scenario should be flagged</label>
+          <button type="submit" class="btn primary">Run backtest</button>
+        </form>
+        <div id="backtest-out"></div>
+      </div>
     </div>
 
     <div id="sub-report" class="sub" hidden>
-      <div class="row"><h2>Report</h2><a class="btn" href="#/explore">Back</a></div>
+      <div class="report-bar"><a class="btn ghost" href="#/explore">&larr; Back to coverage</a><button type="button" class="btn" onclick="window.print()">Print / save PDF</button></div>
       <article id="report-out" class="report"></article>
     </div>
   </section>
 
   <!-- ================= Ops ================= -->
   <section id="view-ops" class="view" hidden>
-    <div class="row ops-bar">
+    <div class="view-head">
+      <h1>Cabin readings</h1>
       <div class="subnav" role="tablist" aria-label="Ops mode">
         <a class="subtab" href="#/ops/crew" data-sub="crew">Crew</a>
         <a class="subtab" href="#/ops/controller" data-sub="controller">Controller</a>
+        <a class="subtab" href="#/ops/twin" data-sub="twin">3D run</a>
       </div>
-      <span class="badge sim">SIMULATED</span> <span class="badge ph">PLACEHOLDER limits</span>
-      <label>Scenario <select id="tele-scenario"></select></label>
-      <label>Material class <input id="material-class" value="solid" size="10"></label>
-      <label>Gravity for the evidence check
+    </div>
+
+    <div class="ops-bar card">
+      <span class="badge sim">SIMULATED</span>
+      <span class="badge ph">PLACEHOLDER limits</span>
+      <label class="inline"><span>Scenario</span><select id="tele-scenario"></select></label>
+      <label class="inline"><span>Material class</span><input id="material-class" value="solid" size="10"></label>
+      <label class="inline"><span>Gravity for the evidence check</span>
         <select id="ops-gravity">
           <option value="">not set</option><option value="0">0 g (orbit, transit)</option>
           <option value="0.16">0.16 g (Moon)</option><option value="0.38">0.38 g (Mars)</option><option value="1">1 g</option>
         </select>
       </label>
-      <span class="mono note" id="ops-clock"></span>
+      <span class="grow"></span>
+      <span class="playback" role="group" aria-label="Simulated run playback">
+        <button type="button" id="ops-play" class="btn ghost icon" aria-pressed="false" aria-label="Pause">Pause</button>
+        <button type="button" id="ops-restart" class="btn ghost icon" aria-label="Restart run">Restart</button>
+        <select id="ops-speed" aria-label="Playback speed"><option value="1">1&times;</option><option value="2">2&times;</option><option value="4">4&times;</option><option value="8">8&times;</option></select>
+        <input id="ops-scrub" type="range" min="0" max="179" step="1" value="0" aria-label="Run step">
+      </span>
+      <span class="mono clock" id="ops-clock"></span>
     </div>
 
     <div id="sub-crew" class="sub astronaut">
-      <div class="row">
-        <label>Compartment <select id="crew-compartment"></select></label>
-        <button type="button" id="large-text" aria-pressed="false">Large text</button>
+      <div class="crew-head">
+        <label class="inline"><span>Compartment</span><select id="crew-compartment"></select></label>
+        <button type="button" id="large-text" class="btn ghost" aria-pressed="false">Large text</button>
       </div>
       <div id="banner" class="banner" role="status" aria-live="polite">Waiting for readings.</div>
-      <p class="note">Tap a tile to see why it has its status.</p>
       <div id="tiles" class="tiles crew-tiles"></div>
+      <p class="note center-note">Tap a tile to see why it has its status.</p>
       <div id="tile-detail" class="tile-detail" hidden></div>
-      <h3>Checklist <span class="badge ill">ILLUSTRATIVE</span></h3>
-      <ol class="checklist">
-        <li>Confirm the reading on a second sensor or a portable monitor.</li>
-        <li>Tell mission control what you see and which compartment it is in.</li>
-        <li>Follow your crew's real, approved procedure. This list is not one.</li>
-      </ol>
+      <div class="card checklist-card">
+        <div class="card-head"><h2>Checklist</h2><span class="badge ill">ILLUSTRATIVE</span></div>
+        <ol class="checklist">
+          <li>Confirm the reading on a second sensor or a portable monitor.</li>
+          <li>Tell mission control what you see and which compartment it is in.</li>
+          <li>Follow your crew's real, approved procedure. This list is not one.</li>
+        </ol>
+      </div>
     </div>
 
-    <div id="sub-controller" class="sub" hidden>
-      <h2>All compartments</h2>
-      <div id="compartments"></div>
-      <h3>Alerts <span class="badge ph">PLACEHOLDER limits</span> <span class="badge ill">ILLUSTRATIVE reasoning</span></h3>
-      <div id="alerts"></div>
-      <h3>Combined view</h3>
-      <p class="note">No aggregate score: each entry below stands on its own, with its own label.</p>
-      <h4>Evidence envelope <span class="badge der">DERIVED</span></h4>
-      <p class="note">The gap engine's combination check on each compartment's live O2, pressure, flow and gravity, for that compartment's material class.</p>
-      <div id="envelope"></div>
-      <h4>Co-occurring concerns <span class="badge ill">ILLUSTRATIVE rules</span> <span class="badge ph">PLACEHOLDER thresholds</span></h4>
-      <div id="co-occurring"></div>
+    <div id="sub-twin" class="sub" hidden></div>
+
+    <div id="sub-controller" class="sub controller" hidden>
+      <div class="card wide">
+        <div class="card-head"><h2>All compartments</h2></div>
+        <div id="compartments"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Alerts</h2><span class="badge ph">PLACEHOLDER limits</span><span class="badge ill">ILLUSTRATIVE reasoning</span></div>
+        <div id="alerts"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Combined view</h2></div>
+        <p class="note">There is no aggregate score. Each entry below stands on its own, with its own label.</p>
+        <h3>Evidence envelope <span class="badge der">DERIVED</span></h3>
+        <p class="note">The gap engine's combination check on each compartment's live O2, pressure, flow and gravity, for that compartment's material class.</p>
+        <div id="envelope"></div>
+        <h3>Co-occurring concerns <span class="badge ill">ILLUSTRATIVE rules</span> <span class="badge ph">PLACEHOLDER thresholds</span></h3>
+        <div id="co-occurring"></div>
+      </div>
     </div>
   </section>
 
   <!-- ================= Builder ================= -->
   <section id="view-builder" class="view" hidden>
-    <h2>Early-design evidence check</h2>
+    <div class="view-head">
+      <h1>Design check</h1>
+    </div>
     <p class="purpose">Check what NASA combustion evidence covers for a candidate cabin atmosphere and materials list before you commit to them.</p>
-    <p class="note">Every field is optional. A blank field is simply not evaluated. Your values are <span class="badge hyp">HYPOTHETICAL</span>; PYRA never calls a material safe or unsafe and does not predict fires.</p>
+    <p class="note lead-note">Every field is optional. A blank field is not evaluated. Your values are <span class="badge hyp">HYPOTHETICAL</span>. PYRA never calls a material safe or unsafe, and it does not predict fires.</p>
     <div id="builder-boundary" class="error" role="alert" hidden></div>
     <div class="builder">
-      <form id="builder" class="rail builder-form" novalidate aria-label="Candidate design">
-        <label>Environment preset <select name="preset" id="b-preset"></select></label>
+      <form id="builder" class="card rail builder-form" novalidate aria-label="Candidate design">
+        <div class="card-head"><h2>Candidate design</h2><span class="badge hyp">HYPOTHETICAL</span></div>
+        <label class="fld"><span class="lbl">Environment preset</span><select name="preset" id="b-preset"></select></label>
         <p class="note" id="b-preset-note"></p>
 
         <div class="field" data-field="gravity_g">
-          <label>Gravity (g) <input name="gravity_g" type="number" step="0.001" min="0" readonly></label>
+          <label class="fld"><span class="lbl">Gravity <em>g</em></span><input name="gravity_g" type="number" step="0.001" min="0" readonly></label>
           <span class="hint"></span><span class="field-error" role="alert"></span>
         </div>
 
-        <div class="field" data-field="o2_percent">
-          <label>Cabin O2 (%) <input name="o2_percent" type="number" step="0.1" min="0" max="100"></label>
-          <span class="hint"></span><span class="field-error" role="alert"></span>
-        </div>
+        <div class="split">
+          <div class="field" data-field="o2_percent">
+            <label class="fld"><span class="lbl">Cabin O2 <em>%</em></span><input name="o2_percent" type="number" step="0.1" min="0" max="100"></label>
+            <span class="hint"></span><span class="field-error" role="alert"></span>
+          </div>
 
-        <div class="field" data-field="pressure">
-          <label>Total pressure
-            <span class="row"><input name="pressure" type="number" step="0.1" min="0">
-              <span class="unit-toggle" role="radiogroup" aria-label="Pressure unit">
-                <label><input type="radio" name="pressure_unit" value="psi" checked> psi</label>
-                <label><input type="radio" name="pressure_unit" value="kPa"> kPa</label>
-              </span></span>
-          </label>
-          <span class="hint"></span><span class="field-error" role="alert"></span>
+          <div class="field" data-field="pressure">
+            <label class="fld"><span class="lbl">Total pressure</span><input name="pressure" type="number" step="0.1" min="0"></label>
+            <span class="unit-toggle" role="radiogroup" aria-label="Pressure unit">
+              <label><input type="radio" name="pressure_unit" value="psi" checked><span>psi</span></label>
+              <label><input type="radio" name="pressure_unit" value="kPa"><span>kPa</span></label>
+            </span>
+            <span class="hint"></span><span class="field-error" role="alert"></span>
+          </div>
         </div>
 
         <div class="field derived-field">
-          <label>O2 partial pressure (kPa) <span class="badge der">DERIVED</span>
-            <output id="b-ppo2" class="mono">set a valid O2 and pressure</output></label>
+          <span class="lbl">O2 partial pressure <span class="badge der">DERIVED</span></span>
+          <output id="b-ppo2">set a valid O2 and pressure</output><span class="ppo2-unit">kPa</span>
         </div>
 
         <fieldset class="field" data-field="flow_min">
-          <legend>Ventilation flow range</legend>
-          <span class="row">
-            <label>min <input name="flow_min" type="number" step="0.1" min="0"></label>
-            <label>max <input name="flow_max" type="number" step="0.1" min="0"></label>
+          <legend class="lbl">Ventilation flow range</legend>
+          <span class="joined three">
+            <label><span class="sr">Flow min</span><input name="flow_min" type="number" step="0.1" min="0" placeholder="min"></label>
+            <label><span class="sr">Flow max</span><input name="flow_max" type="number" step="0.1" min="0" placeholder="max"></label>
             <select name="flow_unit" aria-label="Flow unit"><option>cm/s</option><option>mm/s</option><option>m/s</option></select>
           </span>
           <span class="hint"></span><span class="hint" data-hint="flow_max"></span>
@@ -213,53 +263,67 @@
         </fieldset>
 
         <fieldset class="field" data-field="materials">
-          <legend>Materials</legend>
-          <div id="b-materials" class="picks"></div>
-          <label>Other (not in index) <input name="other_materials" placeholder="comma separated, e.g. silicone foam"></label>
+          <legend class="lbl">Materials</legend>
+          <div id="b-materials" class="picks pills"></div>
+          <label class="fld"><span class="lbl">Other <em>not in index</em></span><input name="other_materials" placeholder="comma separated, e.g. silicone foam"></label>
           <span class="field-error" role="alert"></span>
         </fieldset>
 
-        <label>Pillar of interest
-          <select name="pillar"><option value="all">all</option><option>prevention</option><option>detection</option><option>suppression</option></select>
-        </label>
+        <div class="split">
+          <label class="fld"><span class="lbl">Pillar of interest</span>
+            <select name="pillar"><option value="all">all</option><option>prevention</option><option>detection</option><option>suppression</option></select>
+          </label>
+          <label class="fld"><span class="lbl">Mission duration <em>label only</em></span><input name="mission_duration" maxlength="80" placeholder="e.g. 30 days"></label>
+        </div>
+        <p class="note">Mission duration appears on the result but does not change it.</p>
 
-        <label>Mission duration (label only) <input name="mission_duration" maxlength="80" placeholder="e.g. 30 days"></label>
-        <p class="note">Mission duration is shown on the result but does not change it.</p>
-
-        <button type="submit">Check evidence</button>
+        <button type="submit" class="btn primary block">Check evidence</button>
       </form>
 
-      <div class="builder-out" id="builder-out">
-        <p class="note">Results appear here. Change any field and press Check evidence.</p>
+      <div class="card builder-out" id="builder-out">
+        <div class="empty">
+          <p>Results appear here.</p>
+          <p class="note">Change any field and press Check evidence.</p>
+        </div>
       </div>
     </div>
   </section>
 </main>
 
+<div class="scrim" id="scrim" hidden></div>
+
 <!-- ================= Compare side panel ================= -->
 <aside id="compare-panel" class="drawer wide" aria-label="Compare investigations" hidden>
-  <div class="row drawer-head"><h2>Compare <span class="badge der">DERIVED</span> verdict, <span class="badge mea">MEASURED</span> cells</h2><button type="button" class="drawer-close" data-close="compare-panel" aria-label="Close">&times;</button></div>
+  <div class="drawer-head">
+    <h2>Compare <span class="badge der">DERIVED</span> verdict, <span class="badge mea">MEASURED</span> cells</h2>
+    <button type="button" class="drawer-close" data-close="compare-panel" aria-label="Close">&times;</button>
+  </div>
   <div id="compare-out"></div>
 </aside>
 
 <!-- ================= Assistant side panel ================= -->
 <aside id="ask-panel" class="drawer" aria-label="Ask the evidence" hidden>
-  <div class="row drawer-head"><h2>Ask the evidence</h2><button type="button" class="drawer-close" data-close="ask-panel" aria-label="Close">&times;</button></div>
-  <p class="note">Searches the indexed papers and findings. No model is connected, so PYRA shows the retrieved passages with their sources.</p>
-  <form id="ask" class="row"><input name="question" aria-label="Question" placeholder="Which runs used low pressure?"><button type="submit">Ask</button></form>
+  <div class="drawer-head">
+    <h2>Search papers</h2>
+    <button type="button" class="drawer-close" data-close="ask-panel" aria-label="Close">&times;</button>
+  </div>
+  <p class="note">Searches the indexed papers and findings. No model is connected, so PYRA shows the passages it finds, with their sources.</p>
+  <form id="ask" class="ask-form"><input name="question" aria-label="Question" placeholder="Which runs used low pressure?"><button type="submit" class="btn primary">Ask</button></form>
   <div id="ask-out"></div>
 </aside>
 
 <footer class="footer">
-  <span class="badge mea">MEASURED</span> from a cited source
-  <span class="badge der">DERIVED</span> calculated by PYRA
-  <span class="badge hyp">HYPOTHETICAL</span> typed by you
-  <span class="badge int">INTERPRETATION</span> reasoning, ours or the assistant's
-  <span class="badge sim">SIMULATED</span> generated live values
-  <span class="badge ph">PLACEHOLDER</span> limits not yet sourced
-  <span class="badge ill">ILLUSTRATIVE</span> example, not procedure
-  <span class="badge pro">PROPOSAL</span> suggested experiment
+  <span class="footer-title">Labels</span>
+  <span><span class="badge mea">MEASURED</span> from a cited source</span>
+  <span><span class="badge der">DERIVED</span> calculated by PYRA</span>
+  <span><span class="badge hyp">HYPOTHETICAL</span> typed by you</span>
+  <span><span class="badge int">INTERPRETATION</span> reasoning, ours or the assistant's</span>
+  <span><span class="badge sim">SIMULATED</span> generated live values</span>
+  <span><span class="badge ph">PLACEHOLDER</span> limits not yet sourced</span>
+  <span><span class="badge ill">ILLUSTRATIVE</span> example, not procedure</span>
+  <span><span class="badge pro">PROPOSAL</span> suggested experiment</span>
 </footer>
 <script src="app.js"></script>
+<script type="module" src="twin3d.js"></script>
 </body>
 </html>
