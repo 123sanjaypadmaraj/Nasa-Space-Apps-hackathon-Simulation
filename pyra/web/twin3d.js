@@ -35,7 +35,7 @@ const TWIN_HTML = `
 <div class="twin">
   <div id="twin-stage" class="twin-stage">
     <div id="twin-pins" class="twin-pins"></div>
-    <div id="twin-hud" class="twin-hud">Waiting for readings. [SIMULATED]</div>
+    <div id="twin-hud" class="twin-hud">Waiting for readings…</div>
     <div class="twin-tools">
       <div id="twin-views" class="twin-row"></div>
       <div class="twin-row">
@@ -54,7 +54,7 @@ const TWIN_HTML = `
   </div>
   <aside id="twin-detail" class="twin-detail" aria-live="polite"></aside>
 </div>
-<p class="twin-note">Drag to rotate, scroll to zoom, click a module for details. Readings are SIMULATED; the station layout is ILLUSTRATIVE.</p>`;
+<p class="twin-note">Drag to look around, scroll to zoom, click a module to open it up. The readings are a demo run and the station layout is a sketch, not a real vehicle.</p>`;
 
 const TWIN_CSS = `
 .twin{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:12px;margin-top:12px}
@@ -69,7 +69,8 @@ const TWIN_CSS = `
 .twin-pin:hover{border-color:var(--text-2)}
 .twin-pin.on{outline:1px solid var(--ember);outline-offset:2px}
 .twin-pin.watch{border-color:var(--warn)}.twin-pin.alert{border-color:var(--alert);}
-.twin .tchip{display:inline-block;text-transform:none;font-style:normal;white-space:nowrap;font:600 10px var(--mono);padding:1px 6px;border-radius:999px;border:1px solid currentColor;}
+.twin .tchip{display:inline-flex;align-items:center;gap:5px;text-transform:none;font-style:normal;white-space:nowrap;font:500 11px var(--sans)}
+.twin .tchip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
 .twin .tchip.nominal{color:var(--ok)}.twin .tchip.watch{color:var(--warn)}.twin .tchip.alert{color:var(--alert)}
 .twin-hud{position:absolute;left:12px;top:12px;padding:5px 9px;border-radius:var(--r-sm);border:1px solid var(--line);
   background:color-mix(in srgb,var(--surface) 86%,transparent);color:var(--text-2);font:11px var(--mono)}
@@ -129,7 +130,8 @@ const fmt = (v) => (v == null ? '-' : Math.abs(v) >= 100 ? v.toFixed(0) : Math.a
 function h(tag, attrs = {}, text) {
   const node = document.createElement(tag);
   Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, v));
-  if (text != null) node.textContent = text;
+  // app.js (a classic script) defines human(), which turns the server's provenance labels into plain words.
+  if (text != null) node.textContent = typeof window.human === 'function' ? window.human(String(text)) : text;
   return node;
 }
 
@@ -496,7 +498,7 @@ function select(name, fly = false) {
 
 function drawDetail() {
   detail.replaceChildren();
-  if (!view) { detail.appendChild(h('p', { class: 'twin-note' },'Waiting for the first SIMULATED reading.')); return; }
+  if (!view) { detail.appendChild(h('p', { class: 'twin-note' },'Waiting for the first reading.')); return; }
   const name = selected || pickMostUrgent();
   const room = view.compartments[name];
   if (!room) return;
@@ -519,7 +521,7 @@ function drawDetail() {
     list.appendChild(d);
   });
   detail.appendChild(list);
-  detail.appendChild(h('p', { class: 'twin-note' }, `Temperature ${fmt(room.sample.temperature_c)} C [SIMULATED]. Material class: ${room.material_class || 'not set'}.`));
+  detail.appendChild(h('p', { class: 'twin-note' }, `Temperature ${fmt(room.sample.temperature_c)} °C. Material class: ${room.material_class || 'not set'}.`));
 }
 
 const RANK = { alert: 2, watch: 1, nominal: 0 };
@@ -550,7 +552,7 @@ function update(next) {
       m.pin.querySelector('small').textContent = `O2 ${fmt(s.o2_percent)}% · smoke ${fmt(s.smoke_level)} · flow ${fmt(s.flow_cm_s)}`;
     }
   });
-  $('#twin-hud').textContent = `t = ${next.t} s of ${next.steps} · ${next.scenario} · SIMULATED`;
+  $('#twin-hud').textContent = `t = ${next.t} s of ${next.steps} · ${next.scenario}`;
   drawDetail();
 }
 

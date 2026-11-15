@@ -7,7 +7,7 @@ const QUANTITIES = {
   gravity: "gravity (g)", temperature: "temperature (K)",
 };
 // Okabe-Ito, readable with the common forms of colour blindness.
-const PALETTE = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#BBBBBB"];
+const PALETTE = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#4C9BE8", "#D55E00", "#CC79A7", "#BBBBBB"];
 const SHAPES = { bench: "circle", "spacecraft-scale": "square", unknown: "triangle" };
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -31,11 +31,36 @@ function showError(err) {
   box.hidden = !err;
 }
 
+// The server marks provenance with upper-case labels (SIMULATED, DERIVED, ...) and gap
+// classes with codes (NO_INDEXED_DATA). On screen we drop bracketed tags and read the rest
+// as ordinary words, so the interface speaks plainly.
+const TAG = "(?:MEASURED|DERIVED|HYPOTHETICAL|INTERPRETATION|SIMULATED|PLACEHOLDER|ILLUSTRATIVE|PROPOSAL)";
+const TAG_IN_BRACKETS = new RegExp(String.raw`\s*\[[^\]]*\b${TAG}\b[^\]]*\]`, "g");
+const TAG_IN_PARENS = new RegExp(String.raw`\s*\(${TAG}\)`, "g");
+const TAG_PREFIX = new RegExp(String.raw`^${TAG}:\s*`);
+const TAG_WORD = new RegExp(String.raw`\b${TAG}\b`, "g");
+const CODES = /\b(DIRECTLY[_ ]TESTED|BOUNDED|ONE[_ ]SIDED|INSUFFICIENT|NOT[_ ]COMPARABLE|NO[_ ]INDEXED[_ ]DATA|NOT[_ ]EVALUATED|NOT SET|THRESHOLD|TREND)\b/g;
+function human(text) {
+  if (typeof text !== "string") return text;
+  return text
+    .replace(TAG_IN_BRACKETS, "")
+    .replace(TAG_IN_PARENS, "")
+    .replace(TAG_PREFIX, "")
+    .replace(CODES, (w) => w.replace(/_/g, " ").toLowerCase())
+    .replace(TAG_WORD, (w) => w.toLowerCase());
+}
+
 function el(tag, attrs = {}, text) {
   const node = document.createElement(tag);
   Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, v));
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = human(text);
   return node;
+}
+
+// Same clean-up for HTML the server renders (the scenario report).
+function humanizeTree(root) {
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) n.nodeValue = human(n.nodeValue);
 }
 
 function svgEl(tag, attrs = {}) {
@@ -72,7 +97,7 @@ function table(rows) {
 /* ---------- views ---------- */
 
 // Routes are "#/<tab>/<sub>". Three tabs: explore, ops, builder.
-const TABS = { explore: ["coverage", "research", "report"], ops: ["crew", "controller", "twin"], builder: [] };
+const TABS = { explore: ["coverage", "research", "report"], ops: ["crew", "controller", "twin"], builder: [], agents: [] };
 // Old one-word views (from the six-tab layout) redirect to where they live now.
 const LEGACY = {
   explorer: "explore", researchers: "explore/research", compare: "explore", report: "explore/report",
@@ -101,6 +126,7 @@ function route() {
   if (tab === "explore" && sub === "coverage") drawMap();
   if (tab === "explore" && sub === "research") loadWeakness();
   if (tab === "builder") builderBoundary(loadBuilder)();
+  if (tab === "agents" && window.pyraAgents) window.pyraAgents.show();
 }
 
 function toggleDrawer(id, open) {
@@ -222,7 +248,7 @@ function hoverCard(run, dot) {
   const missing = Object.keys(QUANTITIES).filter((q) => run.values[q] === null || run.values[q] === undefined);
   const lines = Object.keys(QUANTITIES).filter((q) => run.original[q]).map((q) => {
     const o = run.original[q];
-    const kind = run.from_words.includes(q) ? "DERIVED from words" : "MEASURED";
+    const kind = run.from_words.includes(q) ? "· read from the text" : "";
     return `${QUANTITIES[q]}: ${show(run.values[q])} (reported ${show(o.value)} ${o.unit || ""}, ${o.page || "page not provided"}) ${kind}`;
   });
   card.replaceChildren(
@@ -250,7 +276,7 @@ function drawLegend() {
   };
   state.investigations.forEach((inv) => swatch("circle", colorOf(inv.acronym), inv.acronym));
   Object.entries(SHAPES).forEach(([scale, shape]) => swatch(shape, "#8d8f96", `scale: ${scale}`));
-  legend.appendChild(el("span", {}, "Points are MEASURED values; gravity placed from words like \"microgravity\" is DERIVED."));
+  legend.appendChild(el("span", {}, "Points are reported values. Where a paper only says \"microgravity\", we place gravity from that word."));
 }
 
 function scenarioBody() {
@@ -300,7 +326,7 @@ const LADDER = ["DIRECTLY_TESTED", "BOUNDED", "ONE_SIDED", "INSUFFICIENT", "NOT_
 function ladder(cls) {
   const rung = LADDER.indexOf(cls);
   const strength = rung < 0 ? 0 : LADDER.length - rung;
-  const box = el("span", { class: "ladder", title: cls, "aria-hidden": "true" });
+  const box = el("span", { class: "ladder", title: human(String(cls)), "aria-hidden": "true" });
   LADDER.forEach((_, i) => box.appendChild(el("i", { class: i < strength ? "on" : "" })));
   return box;
 }
@@ -324,7 +350,7 @@ function drawGaps() {
     const card = el("div", { class: `gap-card ${g.class}${rung >= 2 ? " weak" : ""}` });
     const top = el("div", { class: "gap-top" });
     top.append(el("span", { class: "gap-axis-name" }, AXIS_LABEL[axis] || axis), ladder(g.class));
-    card.append(top, el("span", { class: `gap-class ${g.class}` }, String(g.class).replace(/_/g, " ")),
+    card.append(top, el("span", { class: `gap-class ${g.class}` }, String(g.class)),
       el("span", { class: "gap-line" }, g.summary));
     box.appendChild(card);
   });
@@ -365,7 +391,7 @@ function drawRanked() {
     const head = el("label", { class: "ranked-head" });
     head.append(pickBox(inv.acronym), el("strong", {}, inv.acronym));
     if (inv.evidence_class) head.appendChild(el("span", { class: "ev" }, inv.evidence_class));
-    head.appendChild(el("span", { class: "total", title: "Closeness score [DERIVED]" }, show(inv.total)));
+    head.appendChild(el("span", { class: "total", title: "How close this investigation is to your scenario" }, show(inv.total)));
     li.appendChild(head);
     const bars = el("div", { class: "bars" });
     Object.entries(inv.scores || {}).forEach(([name, score]) => {
@@ -387,6 +413,7 @@ async function openReport() {
   try {
     const built = await api("/api/report", { scenario: scenarioBody() });
     $("#report-out").innerHTML = built.html;
+    humanizeTree($("#report-out"));
     location.hash = "#/explore/report";
     showError(null);
   } catch (err) { showError(err); }
@@ -425,7 +452,7 @@ function verdictBlock(verdict) {
   const block = el("div", { class: verdict.comparable ? "verdict ok" : "verdict no" });
   if (verdict.comparable) {
     block.appendChild(el("p", { class: "verdict-title" }, "Comparable with care"));
-    block.appendChild(el("p", { class: "note" }, "Hardware, scale, fuel phase and sensors match. [DERIVED]"));
+    block.appendChild(el("p", { class: "note" }, "Hardware, scale, fuel phase and sensors all line up."));
     return block;
   }
   block.appendChild(el("p", { class: "verdict-title" }, "Not directly comparable"));
@@ -461,7 +488,7 @@ async function runCompare() {
     wrap.appendChild(tbl);
     out.appendChild(wrap);
     [["Can conclude", found.can_conclude], ["Cannot conclude", found.cannot_conclude]].forEach(([title, items]) => {
-      out.appendChild(el("h3", {}, `${title} [DERIVED]`));
+      out.appendChild(el("h3", {}, title));
       const ul = el("ul");
       [].concat(items || []).forEach((t) => ul.appendChild(el("li", {}, show(t))));
       out.appendChild(ul);
@@ -588,7 +615,7 @@ function drawCrew() {
   if (!room) return;
   const banner = $("#banner");
   banner.className = `banner ${room.banner.status}`;
-  banner.textContent = room.banner.text;
+  banner.textContent = human(room.banner.text);
   const tiles = $("#tiles");
   tiles.replaceChildren();
   room.tiles.forEach((tile) => {
@@ -620,13 +647,13 @@ function reasoningChain(reasoning) {
   const box = el("div", { class: "chain" });
   const observed = Object.entries(reasoning.observed || {})
     .filter(([k, v]) => typeof v === "number" && k !== "t").map(([k, v]) => `${k} ${show(v)}`).join(", ");
-  box.appendChild(el("p", {}, `1. Observed [SIMULATED]: ${observed}`));
+  box.appendChild(el("p", {}, `1. What the sensors show: ${observed}`));
   const matched = (reasoning.matched_experiments || []).map((m) => m.why);
-  box.appendChild(el("p", {}, `2. Closest indexed experiments [DERIVED]: ${matched.join(" ") || "none"}`));
+  box.appendChild(el("p", {}, `2. Closest experiments we have: ${matched.join(" ") || "none"}`));
   const findings = (reasoning.measured_findings || []).map((f) => `${f.text} (source ${f.source}, ${f.page || "page unknown"})`);
-  box.appendChild(el("p", {}, `3. Measured findings [MEASURED]: ${findings.join("; ") || "none indexed"}`));
-  box.appendChild(el("p", {}, `4. Not covered: ${(reasoning.not_covered || []).join("; ")}`));
-  box.appendChild(el("p", {}, `5. Evidence match: ${reasoning.confidence} [DERIVED]`));
+  box.appendChild(el("p", {}, `3. What those experiments measured: ${findings.join("; ") || "none indexed"}`));
+  box.appendChild(el("p", {}, `4. What they don't cover: ${(reasoning.not_covered || []).join("; ")}`));
+  box.appendChild(el("p", {}, `5. How well the evidence fits: ${reasoning.confidence}`));
   return box;
 }
 
@@ -666,7 +693,7 @@ function drawController() {
       const key = `${name}:${alert.type}:${alert.channel}`;
       const details = el("details", { "data-key": key });
       if (openKeys.has(key)) details.open = true;
-      details.appendChild(el("summary", {}, `${name}: ${alert.type} on ${alert.channel}. ${alert.message} [${alert.label || "DERIVED"}]`));
+      details.appendChild(el("summary", {}, `${name}: ${alert.type} on ${alert.channel}. ${alert.message}`));
       details.appendChild(reasoningChain(room.reasoning));
       list.appendChild(details);
     });
@@ -682,7 +709,7 @@ function drawController() {
     const ul = el("ul");
     Object.entries(check.axes || {}).forEach(([axis, a]) => {
       const li = el("li");
-      li.append(el("span", { class: `gap-class ${a.class || ""}` }, a.class || "NOT SET"), ` ${a.summary}`);
+      li.append(el("span", { class: `gap-class ${a.class || ""}` }, a.class || "not set"), ` ${human(a.summary)}`);
       ul.appendChild(li);
     });
     block.appendChild(ul);
@@ -795,7 +822,7 @@ function drawHints(hints) {
   Object.entries(hints || {}).forEach(([field, cell]) => {
     const span = document.querySelector(`#builder [data-hint=${field}]`) || document.querySelector(`#builder [data-field=${field}] .hint`);
     if (!span || cell.state === "NOT_EVALUATED") return;
-    span.append(el("span", { class: "badge hyp" }, "HYPOTHETICAL"), " ", chip(cell), " ", cell.summary);
+    span.append(chip(cell), " ", human(cell.summary));
   });
 }
 
@@ -804,8 +831,7 @@ function drawBuilderResult(found) {
   drawHints(found.hints);
   const parts = [];
   const head = el("p", { class: "note" });
-  head.append(el("span", { class: "badge hyp" }, "HYPOTHETICAL"), ` inputs, `, el("span", { class: "badge der" }, "DERIVED"),
-    ` coverage. O2 partial pressure: ${found.derived.o2_partial_kpa === null ? "not computed (O2 or pressure not set)" : found.derived.o2_partial_kpa + " kPa"}.`
+  head.append(`Based on the values you entered. O2 partial pressure: ${found.derived.o2_partial_kpa === null ? "not computed (O2 or pressure not set)" : found.derived.o2_partial_kpa + " kPa"}.`
     + (found.mission_duration ? ` Mission duration: ${found.mission_duration} (label only).` : ""));
   parts.push(el("h3", {}, "Materials × axis coverage"), head);
 
@@ -830,7 +856,7 @@ function drawBuilderResult(found) {
     const near = el("td");
     if (row.nearest) {
       const label = `${row.nearest.acronym}${row.nearest.run_id ? " / " + row.nearest.run_id : ""}`;
-      near.append(el("span", { class: "badge mea" }, "MEASURED"), ` ${label}: `);
+      near.append(`${label}: `);
       if (row.nearest.url) near.appendChild(el("a", { href: row.nearest.url, target: "_blank", rel: "noopener" }, row.nearest.source || "source"));
       else near.append(row.nearest.source || "source title not indexed");
     } else near.append("no indexed evidence");
@@ -845,7 +871,8 @@ function drawBuilderResult(found) {
   const proposals = el("ul");
   found.proposals.forEach((p) => {
     const li = el("li");
-    li.append(el("span", { class: "badge pro" }, "PROPOSAL"), " ", p.text.replace(/^PROPOSAL:\s*/, ""));
+    const text = human(p.text);
+    li.append(text.charAt(0).toUpperCase() + text.slice(1));
     proposals.appendChild(li);
   });
   if (!found.proposals.length) proposals.appendChild(el("li", { class: "note" }, "No gap to propose an experiment for."));
@@ -956,21 +983,119 @@ async function runBacktest(event) {
     const found = await api("/api/research/backtest", body);
     $("#backtest-out").replaceChildren(
       el("p", {}, `Kept before ${found.cutoff_year}: ${found.investigations_kept.join(", ") || "none"}. `
-        + `Dropped for having no year: ${found.undated_dropped.join(", ") || "none"}. Hits ${found.hits}, misses ${found.misses}. [DERIVED]`),
+        + `Dropped for having no year: ${found.undated_dropped.join(", ") || "none"}. Hits ${found.hits}, misses ${found.misses}.`),
       table(found.checks));
     showError(null);
   } catch (err) { showError(err); }
 }
 
+/* ---------- AI assistant (Groq through /api/ask) ---------- */
+
+function mk(tag, cls, ...kids) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  kids.flat().forEach((k) => { if (k !== null && k !== undefined && k !== false) node.append(k instanceof Node ? k : String(k)); });
+  return node;
+}
+
+async function loadAskModel() {
+  const chip = $("#ask-model");
+  if (chip.dataset.done) return;
+  try {
+    const info = await api("/api/agents");
+    chip.textContent = info.live ? String(info.llm).replace(/ \(checked.*$/, "") : "offline: passages only";
+    chip.dataset.state = info.live ? "live" : "off";
+    chip.title = info.live ? "Answers come from this model and are checked against PYRA's rules." : "Set GROQ_API_KEY in .env to turn on the model.";
+    chip.dataset.done = "1";
+  } catch { chip.textContent = "unknown"; }
+}
+
+// Answer text with [S1, S2] turned into chips that jump to the source row.
+function citedText(text, msgId) {
+  const frag = document.createDocumentFragment();
+  String(text).split("\n").forEach((line) => {
+    if (!line.trim()) return;
+    const p = mk("p", /^\s*(\(?[abc]\)|#+\s|What the sources|What this means|Limits|Confidence:)/i.test(line) ? "ai-sec" : "");
+    const clean = line.replace(/^#+\s*/, "");
+    let last = 0;
+    clean.replace(/\[(S\d+(?:\s*,\s*S\d+)*)\]/g, (m, ids, at) => {
+      p.append(clean.slice(last, at));
+      ids.split(/\s*,\s*/).forEach((id) => {
+        const a = mk("a", "ai-cite", id);
+        a.href = `#${msgId}-${id}`;
+        a.addEventListener("click", (e) => {
+          e.preventDefault();
+          const row = document.getElementById(`${msgId}-${id}`);
+          if (!row) return;
+          row.closest("details").open = true;
+          row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          row.classList.add("flash");
+          setTimeout(() => row.classList.remove("flash"), 1200);
+        });
+        p.append(a);
+      });
+      last = at + m.length;
+      return m;
+    });
+    p.append(clean.slice(last));
+    frag.append(p);
+  });
+  return frag;
+}
+
+let askCount = 0;
 async function runAsk(event) {
   event.preventDefault();
-  const question = new FormData($("#ask")).get("question");
+  const form = $("#ask");
+  const data = new FormData(form);
+  const question = String(data.get("question") || "").trim();
+  if (!question) return;
+  const log = $("#ask-log");
+  const hints = log.querySelector(".ai-hints");
+  if (hints) hints.remove();
+  form.elements.question.value = "";
+  const btn = form.querySelector("button[type=submit]");
+  btn.disabled = true;
+  log.append(mk("div", "ai-q", question));
+  const bubble = mk("div", "ai-a pending", mk("span", "ai-typing", mk("i"), mk("i"), mk("i")));
+  log.append(bubble);
+  log.scrollTop = log.scrollHeight;
+  const msgId = `ai${++askCount}`;
   try {
-    const found = await api("/api/ask", { question });
-    const text = found.text || "No model is connected, so PYRA shows the retrieved passages only.";
-    $("#ask-out").replaceChildren(el("p", {}, `${text} [${found.label}]`), table(found.context));
+    const found = await api("/api/ask", { question, audience: data.get("audience") });
+    bubble.classList.remove("pending");
+    bubble.replaceChildren(mk("div", "ai-head", mk("span", "ai-label", found.label || "INTERPRETATION"),
+      mk("span", "ai-meta", found.live && found.text ? (found.model || "model") : "retrieval only"),
+      found.retried ? mk("span", "ai-meta", "rewritten once to pass the rules") : null));
+    if (found.text) bubble.append(citedText(found.text, msgId));
+    else bubble.append(mk("p", "", (found.context || []).length
+      ? "No language model is connected, so here are the passages that match your question."
+      : "No data found in the indexed sources."));
+    if (found.model_error) bubble.append(mk("p", "ai-warn", `The model could not be reached (${found.model_error}). Showing the passages instead.`));
+    if ((found.problems || []).length) {
+      bubble.append(mk("details", "ai-checks", mk("summary", "", `${found.problems.length} rule check(s) still flagged: read with care`),
+        mk("ul", "", found.problems.map((p) => mk("li", "", p)))));
+    } else if (found.text && found.live) bubble.append(mk("div", "ai-ok", "Passed PYRA's rule checks: citations, numbers, wording."));
+    const ctx = found.context || [];
+    if (ctx.length) {
+      const rows = ctx.map((c) => {
+        const where = [c.investigation, c.source_id, c.page ? `p. ${c.page}` : null, c.section].filter(Boolean).join(" · ");
+        const row = mk("div", "ai-src", mk("b", "", c.id), mk("span", "ai-where", where), mk("div", "ai-snip", String(c.text || "").slice(0, 420)));
+        row.id = `${msgId}-${c.id}`;
+        return row;
+      });
+      const src = mk("details", "ai-sources", mk("summary", "", `Sources (${ctx.length})`), rows);
+      if (!found.text) src.open = true;
+      bubble.append(src);
+    }
     showError(null);
-  } catch (err) { showError(err); }
+  } catch (err) {
+    bubble.classList.remove("pending");
+    bubble.replaceChildren(mk("p", "ai-warn", err.message || String(err)));
+  }
+  btn.disabled = false;
+  form.elements.question.focus();
+  log.scrollTop = log.scrollHeight;
 }
 
 /* ---------- start ---------- */
@@ -997,7 +1122,15 @@ async function start() {
   $("#builder").addEventListener("input", builderBoundary(async () => { drawPpo2(); showFieldErrors(validateBuilder(builderBody())); }));
   $("#b-preset").addEventListener("change", builderBoundary(async () => { applyPreset(); await runBuilder(); }));
   $("#ask").addEventListener("submit", runAsk);
-  $("#ask-toggle").addEventListener("click", () => toggleDrawer("ask-panel"));
+  $("#ask-toggle").addEventListener("click", () => { toggleDrawer("ask-panel"); loadAskModel(); if (!$("#ask-panel").hidden) $("#ask [name=question]").focus(); });
+  document.querySelectorAll(".ai-hint").forEach((b) => b.addEventListener("click", () => {
+    $("#ask [name=question]").value = b.textContent;
+    $("#ask").requestSubmit();
+  }));
+  $("#demo-run").addEventListener("click", () => {
+    if (!location.hash.startsWith("#/agents")) location.hash = "#/agents";
+    setTimeout(() => window.pyraAgents && window.pyraAgents.demo(), 0);
+  });
   $("#scrim").addEventListener("click", () => document.querySelectorAll(".drawer:not([hidden])").forEach((d) => toggleDrawer(d.id, false)));
   document.querySelectorAll(".drawer-close").forEach((b) => b.addEventListener("click", () => toggleDrawer(b.dataset.close, false)));
   document.addEventListener("keydown", (e) => {

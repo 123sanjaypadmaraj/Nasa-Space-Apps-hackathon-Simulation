@@ -56,18 +56,17 @@ class ServerTest(unittest.TestCase):
         content_type, _ = self.get("/app.js")
         self.assertIn("javascript", content_type)
 
-    def test_page_has_three_tabs_and_no_compare_tab(self):
+    def test_page_has_four_tabs_and_no_compare_tab(self):
         _, body = self.get("/")
         page = body.decode()
-        for tab in ("explore", "ops", "builder"):
+        for tab in ("explore", "ops", "builder", "agents"):
             self.assertIn(f'data-tab="{tab}"', page)
-        self.assertEqual(page.count('data-tab="'), 3)
+        self.assertEqual(page.count('data-tab="'), 4)
         self.assertIn('id="ask-panel"', page)
         self.assertIn('id="compare-panel"', page)       # compare is a side panel now
         self.assertNotIn("explore/compare", page)       # not a tab or sub-view
-        for label in ("MEASURED", "DERIVED", "HYPOTHETICAL", "INTERPRETATION", "SIMULATED",
-                      "PLACEHOLDER", "ILLUSTRATIVE", "PROPOSAL"):
-            self.assertIn(label, page)
+        self.assertNotIn('class="badge', page)          # no provenance tags in the UI
+        self.assertIn("not real sensors", page)         # Ops still says its readings are a demo
 
     def test_weakness_names_the_dominant_weakness(self):
         _, body = self.get("/api/research/weakness")

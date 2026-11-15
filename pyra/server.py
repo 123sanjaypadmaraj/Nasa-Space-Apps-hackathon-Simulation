@@ -32,6 +32,10 @@ class BadRequest(Exception):
     pass
 
 
+class NotFound(Exception):
+    pass
+
+
 def engine(name):
     """Import pyra.<name> now, or say clearly which module is not there yet."""
     try:
@@ -181,19 +185,81 @@ def builder_check(corpus, body, query):
 
 
 def ask(corpus, body, query):
-    """Retrieved context and the assistant's checks. No model is called here."""
+    """The research assistant. Retrieves passages, then asks the language model (Groq by default)
+    when a key is set; every answer is checked against PYRA's rules and retried once on a break.
+    Without a key, or when the model cannot be reached, the passages come back on their own."""
     retrieval, assistant = engine("retrieval"), engine("assistant")
     question = (body.get("question") or "").strip()
     if not question:
         raise BadRequest("ask needs a 'question'")
+    audience = body.get("audience") if body.get("audience") in assistant.AUDIENCES else "student"
+    scenario = body.get("scenario") if isinstance(body.get("scenario"), dict) else None
     index = retrieval.Index()
     index.index_corpus(corpus)
     chunks = index.search(question)
-    reply = assistant.answer(question, chunks)
-    return dict(reply, context=chunks)
+    llm = engine("agents.llm").get_llm()
+    live = bool(getattr(llm, "live", False))
+    meta = {"model": getattr(llm, "model", None) if live else None, "live": live, "context": chunks}
+    if not live or not chunks:
+        reply = assistant.answer(question, chunks, scenario, audience)
+        reply.pop("messages", None)
+        return dict(reply, **meta)
+    try:
+        reply = assistant.answer(question, chunks, scenario, audience, ask_model=llm.chat)
+        if reply["problems"]:
+            first = reply["problems"]
+
+            def retry(system, user):
+                fixes = "\n- ".join(first)
+                return llm.chat(system, f"{user}\n\nYOUR LAST ANSWER BROKE THESE RULES, FIX THEM:\n- {fixes}")
+            again = assistant.answer(question, chunks, scenario, audience, ask_model=retry)
+            if len(again["problems"]) <= len(first):
+                reply = again
+            reply["retried"] = True
+    except Exception as err:  # noqa: BLE001  the passages still answer
+        reply = dict(assistant.answer(question, chunks, scenario, audience),
+                     model_error=f"{type(err).__name__}: {err}"[:300])
+    reply.pop("messages", None)
+    return dict(reply, **meta)
+
+
+def _agent_run(path_tail):
+    run = engine("agents.runs").get(path_tail)
+    if run is None:
+        raise NotFound(f"no agent run '{path_tail}'")
+    return run
+
+
+def agents_info(corpus, body, query):
+    team, llm = engine("agents.team"), engine("agents.llm").get_llm()
+    return dict(team.describe(), llm=llm.name, live=llm.live,
+                agents=[{"id": a, "label": label, "role": role} for a, label, role in team.AGENTS])
+
+
+def agents_start(corpus, body, query):
+    """body: {goal, mode: full|evidence|gaps|lessons|custom, agents: [...],
+    scenario: {preset, o2_percent, pressure, pressure_unit, flow_speed, gravity_g, materials, pillar, pilot_mode}}"""
+    team = engine("agents.team")
+    if body.get("mode") and body["mode"] not in team.MODES:
+        raise BadRequest(f"mode must be one of {', '.join(team.MODES)}")
+    if body.get("scenario") is not None and not isinstance(body["scenario"], dict):
+        raise BadRequest("scenario must be an object")
+    run = engine("agents.runs").start(body, corpus)
+    return {"run_id": run.id}
+
+
+def agents_ask(corpus, body, query):
+    runs, team = engine("agents.runs"), engine("agents.team")
+    agent = str(body.get("agent") or "supervisor")
+    if agent not in team.LABELS:
+        raise BadRequest(f"unknown agent '{agent}'")
+    run = runs.get(str(body.get("run_id") or ""))
+    state = run.state if run and run.state else runs.latest_state()
+    return runs.ask(agent, str(body.get("question") or "").strip(), state, engine("agents.llm").get_llm())
 
 
 GET_ROUTES = {
+    "/api/agents": agents_info,
     "/api/investigations": lambda corpus, body, query: corpus["investigations"],
     "/api/runs": lambda corpus, body, query: corpus["runs"],
     "/api/telemetry": telemetry,
@@ -210,7 +276,23 @@ POST_ROUTES = {
     "/api/research/opportunities": opportunities,
     "/api/research/backtest": backtest,
     "/api/ask": ask,
+    "/api/agents/run": agents_start,
+    "/api/agents/ask": agents_ask,
 }
+# /api/agents/<action>/<run_id>
+AGENT_RUN_GET = {"state": lambda run, body: run.snapshot()}
+AGENT_RUN_POST = {
+    "resume": lambda run, body: _resume(run, body),
+    "stop": lambda run, body: (run.stop(), {"ok": True})[1],
+}
+
+
+def _resume(run, body):
+    decision = body.get("decision") if body.get("decision") in ("approve", "reject") else "reject"
+    ids = [str(x) for x in body.get("ids")] if isinstance(body.get("ids"), list) else []
+    if not run.resume({"decision": decision, "ids": ids}):
+        raise BadRequest("this run is not waiting for approval")
+    return {"ok": True}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -242,10 +324,62 @@ class Handler(BaseHTTPRequestHandler):
         except BadRequest as err:
             self.send_json(400, {"error": str(err)})
 
+    def agent_run(self, routes, body):
+        """/api/agents/<action>/<run_id>. True when the path was one of these."""
+        parts = urlparse(self.path).path.strip("/").split("/")
+        if len(parts) != 4 or parts[:2] != ["api", "agents"] or parts[2] not in routes:
+            return False
+        try:
+            run = _agent_run(parts[3])
+            self.send_json(200, routes[parts[2]](run, body))
+        except MissingModule as err:
+            self.send_json(503, {"error": str(err)})
+        except NotFound as err:
+            self.send_json(404, {"error": str(err)})
+        except BadRequest as err:
+            self.send_json(400, {"error": str(err)})
+        return True
+
+    def stream(self, run_id):
+        """Server-Sent Events: every event of an agent run, then the connection closes."""
+        try:
+            run = _agent_run(run_id)
+        except (MissingModule, NotFound) as err:
+            return self.send_json(404, {"error": str(err)})
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        index = 0
+        try:
+            self.wfile.write(b": connected\n\n")
+            self.wfile.flush()
+            while True:
+                batch, finished = run.events_since(index, timeout=15)
+                if not batch:
+                    if finished:
+                        return
+                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.flush()
+                    continue
+                for event in batch:
+                    index += 1
+                    self.wfile.write(f"id: {event['seq']}\ndata: {json.dumps(event, default=str)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                if batch[-1].get("type") in ("done", "error"):
+                    return
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+
     def do_GET(self):
         url = urlparse(self.path)
         if url.path == "/api/export":
             return self.export(parse_qs(url.query))
+        if url.path.startswith("/api/agents/stream/"):
+            return self.stream(url.path.rsplit("/", 1)[1])
+        if self.agent_run(AGENT_RUN_GET, {}):
+            return
         if url.path.startswith("/api/"):
             return self.answer(GET_ROUTES, {})
         self.static(url.path)
@@ -256,6 +390,10 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError as err:
             return self.send_json(400, {"error": f"request body is not valid JSON ({err})"})
+        if not isinstance(body, dict):
+            return self.send_json(400, {"error": "request body must be a JSON object"})
+        if self.agent_run(AGENT_RUN_POST, body):
+            return
         self.answer(POST_ROUTES, body)
 
     def export(self, query):

@@ -107,6 +107,19 @@ so there's no separate citations table. `research_gaps` comes in Phase 2, which 
 - someone has run `spotcheck` and confirmed the rows against the papers
 - `python -m unittest discover tests` passes
 
+## 3D simulation demo
+
+`demo/pyra-3d.html` is a standalone three-act demo (Habitat, 2D Evidence Atlas, Data Pipeline).
+On Windows, start it with:
+
+```
+.\run-simulation.ps1                  # serves demo/ on http://127.0.0.1:8080 and opens the browser
+.\run-simulation.ps1 -Port 9000 -Test # different port; run the flame model tests first
+```
+
+It uses Python's `http.server` if Python is installed, otherwise a built-in PowerShell server.
+If scripts are blocked, run `powershell -ExecutionPolicy Bypass -File .\run-simulation.ps1`.
+
 ## Phase 2: engines and web app
 
 Still plain Python 3, nothing to install.
@@ -143,3 +156,37 @@ co-occurrence thresholds PLACEHOLDER (`config/alerts.json`).
 | `pyra/builder.py` | Builder early-design evidence check: environment presets (`config/environment_presets.json`, sources not yet verified), validation, materials × axis table, cited design notes (`config/design_rules.json`) |
 | `pyra/mlaudit.py` | Says whether there is enough data to train a model |
 | `pyra/server.py`, `pyra/web/` | Standard-library web server, JSON API and the page |
+
+## Agents tab: the evidence agent team (`pyra/agents/`)
+
+A supervised team of eight agents, ported from the EMBER prototype (`ember/`, LangGraph + FastAPI) to the
+standard library and bound to the rules in `docs/RULES.md`. It uses the same corpus, ranking, gap, builder and
+research engines as the other tabs. Nothing to install; no model needed.
+
+```
+supervisor -> librarian -> mission_profiler -> physicist -> evidence_ranker <-> skeptic (max 3 passes)
+           -> incident_analyst -> gap_hunter -> safety_officer (a person approves) -> reporter
+```
+
+| Agent | What it does |
+| --- | --- |
+| Librarian | Summarises the corpus and flags DUMMY data |
+| Mission Profiler | Preset (`config/environment_presets.json`) + typed values -> one HYPOTHETICAL scenario, with the source of every value |
+| Physicist | Buoyant vs ventilation flow, order-of-magnitude scaling with ILLUSTRATIVE constants (never a fire prediction) |
+| Evidence Ranker | Ranks investigations and drafts one labelled, cited claim per material |
+| Skeptic | Blocks MEASURED claims whose whole combination was not tested, missing citations, unstated partial gravity and banned wording; sends the draft back |
+| Incident Analyst | Apollo 1, Apollo 13, Mir as fire chains (`config/incidents.json`, not yet verified), matched to the scenario as INTERPRETATION |
+| Gap Hunter | Per-axis gap classes, data opportunities, and the PROPOSAL experiment that closes the biggest gap |
+| Safety Officer | Evidence actions (what to test, what to verify, what not to present as measured); pauses for human approval |
+
+Run it from the **Agents** tab (`python -m pyra serve --dummy`, then `#/agents`). API: `GET /api/agents`,
+`POST /api/agents/run {goal, mode: full|evidence|gaps|lessons|custom, agents?, scenario: {preset, o2_percent,
+pressure, pressure_unit, flow_speed, gravity_g, materials, pillar, pilot_mode: approve|shadow}}`,
+`GET /api/agents/stream/<id>` (Server-Sent Events), `POST /api/agents/resume/<id> {decision, ids}`,
+`POST /api/agents/stop/<id>`, `GET /api/agents/state/<id>`, `POST /api/agents/ask {agent, question, run_id}`.
+
+**Model (optional).** Offline and scripted by default. Put `GROQ_API_KEY=...` in a `.env` at the project root (see
+`.env.example`; any OpenAI-compatible endpoint works through `PYRA_LLM_BASE_URL` / `PYRA_LLM_MODEL`) and the model
+words the summaries and may add agents to the route. Every sentence it writes goes through `llm.rule_problems()`:
+a number not in the tool data, "safe"/"unsafe", "applies to the Moon/Mars" or a fire prediction means the scripted
+sentence is used instead. Numbers always come from code. `PYRA_AGENTS_OFFLINE=1` forces offline.
